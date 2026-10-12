@@ -13,6 +13,21 @@ This document does four things:
 
 ---
 
+## Code
+
+The first 30-day step from section 6 is implemented in [`engine/`](engine/): a TypeScript package with the decision client (pinned model, retries, mock mode), the four versioned question batteries, the rules that turn atomic answers and numeric buckets into verdicts, the linking and cannibalisation module, the publish gate, the financial-promotions compliance gate, the decision log (JSONL and Supabase) and three CLIs. It runs fully offline with a deterministic mock, so you can develop and test before your TypeSafe key arrives.
+
+```bash
+cd engine && npm install && npm test
+npm run linking -- --dir test/fixtures --mock --top-k 3
+npm run publish-gate -- --dir test/fixtures --mock
+npm run compliance -- --file test/fixtures/ad-bad.txt --mock
+```
+
+See [`engine/README.md`](engine/README.md) for the layout and the live-run commands.
+
+---
+
 ## 0. The short version
 
 - **Jev rewards products that need thousands to millions of small, bounded judgments.** It punishes products that need a paragraph, a calculation, or a date comparison. Marketing and content operations are full of the first kind of work and most teams still do it by hand or with slow, expensive LLM calls.
