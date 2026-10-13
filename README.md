@@ -1,664 +1,524 @@
-# Building on Jev: Marketing and Content Products
+# PRD: SEO Decision Platform
 
-Working notes and build plan. Version 1.0, 11 October 2026.
+> **Run the app.** `npm install`, then `npm run dev`, then open http://localhost:3000. Add a site and tick "Load sample exports" to try it without your own data. Decisions use an offline mock until you create `.env.local` in this folder containing `TYPESAFE_API_KEY=your-key`, then restart. Engine tests: `npx vitest run`. Sample exports are rebuilt with `npx tsx scripts/make-samples.ts`.
 
-Jev is TypeSafe AI's System One model, released 15 September 2026. It does not write text. You send it a `state` (text or JSON) and a set of typed questions, and it returns choices, scores and yes/no probabilities, all evaluated in parallel, each with calibrated confidence, in roughly 100 milliseconds, at $0.042 per million input tokens with free output. That changes the economics of one specific thing: a frontier-quality judgment on a single item (a URL, a keyword, a headline, a review, a proposed action) now costs close to nothing and is fast enough to sit inside a request path or an editor.
+11 Oct 2026 · @Gbolahan
 
-This document does four things:
+## 1. Overview
 
-1. Pins down what Jev can and cannot do, from the official docs, so every idea here is buildable.
-2. Stress-tests the seven ideas already on the table.
-3. Adds new ideas that only make sense now that a judgment is nearly free.
-4. Recommends what to build first, in what order, with a reference architecture and a worked API example.
+The SEO Decision Platform is a standalone SaaS that turns SEO from periodic audits into continuous, scored decisions. For every URL, keyword, page, prompt, link prospect and location a customer owns, the platform returns a verdict (what to do), a reason, a calibrated confidence score and an expected impact, then tracks whether the decision paid off.
 
----
+**The problem.** SEO teams and agencies make thousands of small judgement calls a month: refresh or prune this page, which cluster does this keyword belong to, should this programmatic page be indexed, why did a competitor get cited in ChatGPT. Today these are made by hand, inconsistently, or bought as a £2,000 to £5,000 one-off audit that is stale within weeks. Existing tools surface data but stop at diagnosis; nobody closes the loop on whether the recommendation worked.
 
-## Code
+**Why now.** Decision-only models such as TypeSafe's Jev (launched 15 September 2026) and OpenAI's Decisions API (public beta 6 October 2026) make a single classification decision cost a fraction of a cent, with calibrated confidence rather than free text. That makes it economic to score every item on a site every day rather than sample once a quarter. At the same time, Google's helpful-content updates and the shift of search to AI answers have made "which pages deserve to exist" and "why aren't we cited" the two most expensive questions in SEO.
 
-Two packages in an npm workspace:
+**Core idea.** One decision engine, seven modules. Each module is a workflow (connect data, score items, review verdicts, execute, measure) built on the same engine, the same confidence rules and the same outcome ledger. The outcome ledger is the moat: every decision is matched to what happened next (traffic, rankings, citations), and that data recalibrates the thresholds per customer and per vertical.
 
-- [`engine/`](engine/): the decision engine. Decision client (pinned model, retries, mock mode), the four versioned question batteries, rules in code, linking and cannibalisation, publish gate, compliance gate, decision log, CLIs, 41 tests.
-- [`app/`](app/): the working product. Next.js 16, file-backed storage, server actions, background runs with live progress. Add a site, run it, accept links, export CSV, read the decision log.
+### Modules
 
-```bash
-npm install
-npm run dev        # http://localhost:3000, mock decisions until TYPESAFE_API_KEY is set in app/.env.local
-npm test           # engine tests
-```
+1. Content Decision Engine (flagship, MVP)
+2. Keyword Intent and Clustering
+3. Programmatic SEO Quality Gate
+4. AI Search Visibility Tracker
+5. Content Brief and Editorial Decision Desk
+6. Link and Digital PR Opportunity Filter
+7. Local SEO Autopilot
 
-See [`engine/README.md`](engine/README.md) and [`app/README.md`](app/README.md).
+### Product principles
 
----
+- A verdict, not a dashboard: every screen ends in an action.
+- Confidence is first-class: low-confidence decisions go to a human, never silently executed.
+- Model-agnostic: Jev, OpenAI Decisions or an open-source decision model behind one interface.
+- Closed loop: no decision is final until the outcome is measured.
 
-## 0. The short version
+## 2. Target customers and personas
 
-- **Jev rewards products that need thousands to millions of small, bounded judgments.** It punishes products that need a paragraph, a calculation, or a date comparison. Marketing and content operations are full of the first kind of work and most teams still do it by hand or with slow, expensive LLM calls.
-- **The content decision engine (idea 1) is the right platform, and it is the one to build.** But do not start with the Search Console and GA4 audit. Start with the two modules that are most Jev-shaped and can demo in two weeks: a **publish gate** (your idea 3, widened to all content) and a **pairwise internal-linking and cannibalisation engine** (new). They generate the first decision logs, and the decision log is the moat.
-- **One new idea deserves to be a product in its own right: a claims and compliance gate for marketing copy in regulated verticals** (finance and prop firms, crypto, health, gambling). You already run a manual version of this for TradersYard with factual-accuracy rules and two review gates. It uses the same engine as the content platform and carries the strongest innovation and safety story for a Tech Nation application.
-- **One open-source side project: an action guardrail for AI agents working inside marketing systems** (send campaign, publish post, change budget, delete list). It is cheap to build, highly visible, and feeds both the visa evidence file and the top of your funnel.
-- **Everything else on the list is a module, not a company.** Keyword clustering, brief generation, link prospecting and AI-citation tracking all become columns and tabs inside the platform.
+Initial market is UK and English-speaking SMB and mid-market SEO: agencies with 5 to 50 clients, in-house SEO leads at ecommerce and SaaS companies with 1,000 to 500,000 URLs, and multi-location businesses. Enterprise (BrightEdge, Conductor buyers) is out of scope for the first year.
 
----
-
-## 1. What Jev is, in facts you can build on
-
-All figures below are from TypeSafe's documentation and launch post as of 11 October 2026. Links are in the Sources section.
-
-### The three primitives
-
-| Primitive | Question shape | Returns |
-|---|---|---|
-| **Choice** | Pick one option from a list you define (up to 255 options) | `choice`, `probabilities` over every option, `confidence` |
-| **Score** | Place the state on an ordered rubric whose levels you describe | `score`, `probabilities` over levels, `confidence` |
-| **Noul** | Is this statement true? | `noul`, a probability from 0 to 1 (no separate confidence; distance from 0.5 is the signal) |
-
-All three can be mixed in one request. Every question is evaluated independently and in parallel against the same state. Adding questions barely changes latency and does not create context rot between questions.
-
-### Operating facts
-
-| Fact | Value |
-|---|---|
-| Current model | `jev-1.13.0` (aliases `jev-latest`, `jev-preview`) |
-| Price | $0.042 per million input tokens; output free |
-| Latency | 70 to 500 ms end to end; most queries around 100 ms |
-| Context | 64k tokens per request; 32k for state plus the longest single question |
-| Rate limits | 100k tokens per second, 80 requests per second (adjusting dynamically during early access) |
-| Input | Text only: string, JSON object, or array of text. No images, audio or video |
-| Language | English is primary; other languages accepted with lower accuracy |
-| Customisation | No fine-tuning. You shape answers through `state`, `instructions` and `criteria` |
-| Training | Reinforcement Learning for Calibrated Decisions (RLCD); not trained on customer data |
-| Access | TypeSafe API and SDKs (Python, JavaScript), plus Requesty, OpenRouter, Vercel AI Gateway, Lovable; LangChain `TypeSafeClassifier` |
-
-### What Jev will not do well (from the official jaggedness page for 1.13)
-
-| Failure mode | What to do instead |
-|---|---|
-| Generate text | Use an LLM for briefs, reasons written as prose, rewrites |
-| Arithmetic and counting | Compute in code. Pass Jev named buckets, not raw numbers |
-| Date and time comparison | Extract date parts with Choice, compare in code |
-| Indirection and double negatives | Ask direct, literal questions; point at fields by name with backticks |
-| Large state full of irrelevant detail | Filter in code first; send only what the question needs |
-| Adversarial content | Do not treat Jev as a security boundary; write precise criteria; test edge cases |
-| Contradictory instructions and criteria | Align them; avoid Nouls where true means no |
-| Choice option order bias | Shuffle options and check consistency |
-| Literal reading | Put boundary cases in the criteria; split interpretive questions into two literal ones |
-
-The practical consequence for a marketing product: **Jev decides, code computes, an LLM writes.** Every architecture below follows that split.
-
----
-
-## 2. The Jev lens: a fit test for marketing ideas
-
-Score any idea against these seven questions before building. An idea that fails two or more is probably an LLM product wearing a Jev badge.
-
-1. **Is the unit of work a judgment with a bounded answer?** Classify, score, rank, verify, route. Not write, summarise or calculate.
-2. **Are there many units?** Thousands to millions of URLs, keywords, ads, replies, pairs. Jev's price only matters at volume.
-3. **Does latency matter?** Inside an editor as someone types, inside a publish pipeline, inside a page request. LLM latency made these impossible; 100 ms makes them normal.
-4. **Can the numbers stay in code?** Traffic trends, CTR, word counts, dates, spend. If the decision is mostly numeric, you do not need Jev at all.
-5. **Can you filter the state to roughly 2k tokens per decision?** Accuracy falls with irrelevant context.
-6. **Can you measure outcomes?** Calibration against real results (did the refresh recover traffic, did the headline win) is where the moat forms.
-7. **Is a wrong answer recoverable, or gateable by confidence?** High confidence acts, medium flags, low routes to a human.
-
-### Where marketing is full of Jev-shaped work
-
-| Stream | Typical volume | Judgment per item |
-|---|---|---|
-| URLs on a site | 100 to 1,000,000 | Intent, depth, freshness risk, duplication, verdict |
-| Keywords and Search Console queries | 1,000 to 500,000 | Intent, stage, brand, question, page fit |
-| SERP results per keyword | 10 per keyword | Format, intent served, authority signals |
-| Page pairs (linking, cannibalisation) | n × k after embedding filter | Same intent? Link helpful? Which survives? |
-| Ads, headlines, subject lines, CTAs | 10 to 10,000 per team per month | Clarity, promise, stage fit, claim risk, voice fit |
-| Email and form replies, DMs | 100 to 100,000 per month | Intent, ICP fit, urgency, objection type |
-| Reviews, community posts, mentions | 1,000 to 1,000,000 | Theme, sentiment, feature request, churn signal, brand risk |
-| Backlink and PR prospects | 1,000 to 100,000 | Relevance, quality tier, toxic signals, outreach angle |
-| Proposed actions by AI agents | 10 to 10,000 per day | Reversible? Blast radius? On plan? Compliant? |
-
-Three product shapes recur across these streams, and the same engine serves all three:
-
-- **Auditor.** Map-reduce over everything you own. Every item gets a verdict. Runs on a schedule.
-- **Gate.** A check before an action: before publish, before send, before an agent acts. Runs in real time.
-- **Router.** Triage a stream to handlers. Runs on arrival.
-
----
-
-## 3. Design rules that make or break a Jev product
-
-These follow directly from the docs and from the first month of community builds.
-
-1. **Decompose every broad judgment into atomic questions.** Not "should we refresh this page?" but ten literal questions about intent match, depth, freshness risk and overlap, combined in code. The atomic answers double as the explanation shown to the user. Explainability comes free, without generating text.
-2. **Keep every number in code and pass Jev a named bucket.** `click_trend_12m: "declining_sharply"` not `clicks: [412, 398, ...]`.
-3. **Filter state hard.** For a URL: title, H1, meta description, headings, first 1,200 characters, top queries, and a handful of computed buckets. Not the whole HTML.
-4. **Use embeddings for candidate generation and Jev for the judgment.** Pairwise questions are quadratic. Pick the top 20 to 50 candidates per item with pgvector, then ask Jev about each pair.
-5. **Gate on confidence, with thresholds scaled to the stakes.** Auto-apply a low-risk verdict at 0.8. Require a human for a redirect or a prune at 0.9. Route anything under 0.5 to review.
-6. **Pin the model version.** Thresholds tuned on `jev-1.13.0` may not hold on the next release. Log the versioned ID the response reports with every decision.
-7. **Build the control before the swap.** Log Jev's decision alongside a stronger LLM judge or a human for a week; study the disagreements; measure calibration on your own data (do decisions at 0.8 come out right about 80 percent of the time).
-8. **Abstract the decision client.** The request shape (state in, typed probabilities out) already has open-weight imitations and five hosting routes. Code against your own thin interface so you can switch hosts or fall back to an LLM behind TypeSafe's System One adapter.
-9. **Store every decision.** The decision log (entity, question, answer, confidence, model version, timestamp) plus the outcome log (what was done, what happened) is the asset that compounds. It becomes training data for a classical model on top of Jev's probabilities, and it is the thing a competitor cannot copy by calling the same API.
-
----
-
-## 4. Your seven ideas, stress-tested
-
-### Scorecard
-
-Each criterion scored 1 to 5. Build effort is inverted (5 is easiest). Total out of 30.
-
-| # | Idea | Jev fit | Novelty | Demand | Build ease | Moat | Visa story | Total |
-|---|---|---|---|---|---|---|---|---|
-| 1 | Content decision engine | 4 | 3 | 4 | 2 | 5 | 4 | **22** |
-| 2 | Keyword intent and clustering | 4 | 2 | 3 | 3 | 2 | 2 | 16 |
-| 3 | Programmatic SEO quality gate | 5 | 4 | 3 | 4 | 3 | 4 | **23** |
-| 4 | AI search visibility tracker | 2 | 3 | 4 | 2 | 2 | 4 | 17 |
-| 5 | Content brief and editorial desk | 3 | 2 | 3 | 3 | 2 | 2 | 15 |
-| 6 | Link and digital PR filter | 4 | 2 | 3 | 3 | 2 | 2 | 16 |
-| 7 | Local SEO autopilot | 3 | 2 | 4 | 1 | 2 | 2 | 14 |
-
-### 1. Content decision engine
-
-**Verdict: build it. It is the platform everything else plugs into.**
-
-*Where Jev fits.* Every URL gets a battery of 10 to 20 atomic questions in one call: which intent the page serves, which intent its top queries express, whether the title promises what the queries ask, whether the intro answers directly, how deep the coverage is, whether it shows first-hand experience, whether it makes time-sensitive claims, whether each of its five nearest sibling pages would satisfy the same queries, and which sibling would be the best consolidation home. Every one of those is a bounded judgment.
-
-*What stays in code.* Everything numeric and temporal: click and impression trends, CTR against position-expected CTR, decline percentages, days since last modified, backlink counts, crawl status. These are computed first and passed in as named buckets. The verdict itself (refresh, merge, redirect, prune, expand, leave) is a rule in code over the atomic answers and the buckets. The "expected traffic impact" is a regression on your own historical outcomes with Jev's probabilities as features, not a Jev question. Until you have outcomes, show impact as a labelled heuristic band.
-
-*Where an LLM fits.* Nowhere in the verdict. Optionally for turning the atomic answers into a sentence, though a template over the atomic answers ("Intent mismatch 0.91, depth thin 0.84, clicks down 43 percent in 12 months") is clearer and free.
-
-*The moat.* Outcome tracking with built-in controls. When the engine says "refresh" on 40 pages, act on 30 and hold 10 as a matched control. Eight to twelve weeks later you can separate the effect of the action from the effect of an algorithm update. No audit vendor does this because audits are one-off. A subscription can. The verdict-to-outcome dataset calibrates the engine per site type and becomes the thing you can publish about.
-
-*Risks.* Search Console API quotas and the fact that most sites have thin data per URL. Mitigate by aggregating at the query-cluster level and by letting the crawl-only tier work without GSC. Attribution noise, handled by the control groups above.
-
-*Pricing reality.* £79 to £399 a month is right for in-house teams. Agencies will want per-site pricing and white-label reports; that is your channel, not your competitor.
-
-*Build sequence.* Do not start with the OAuth flows and the dashboards. Start with the two modules below (idea 3 and new idea N2) which produce value from a crawl alone, then add GSC and GA4 for the full verdict layer.
-
-### 2. Keyword intent and clustering platform
-
-**Verdict: a module inside idea 1, not a standalone product.**
-
-*Where Jev fits.* Per-keyword Choice for intent (informational, commercial investigation, transactional, navigational, local), Choice for buying stage, Noul for "is a question", Noul for brand versus non-brand, Choice for expected content format. And the strongest piece: **Choice over up to 255 existing pages to answer "which page on this site deserves this keyword?"** That gives you page mapping and cannibalisation warnings in one question.
-
-*What stays in code.* Volume, difficulty, SERP overlap counts, and the clustering itself. Fifty thousand keywords is 1.25 billion pairs; pairwise Jev is not an option. Cluster with embeddings and SERP overlap in code, then use Jev to verify membership of borderline keywords and to label each cluster's intent and stage.
-
-*Why not standalone.* Keyword clustering is a crowded, price-compressed category (Keyword Insights, Keyword Cupid, the clustering tabs in SE Ranking and Semrush). Jev lets you undercut on price, but price is not a moat when the API contract has open clones. The defensible version is clustering that is already mapped to the client's pages and verdicts, which is idea 1.
-
-### 3. Programmatic SEO quality gate
-
-**Verdict: build it first, widened into a general publish gate. It is the fastest MVP on the list and the most Jev-shaped.**
-
-*Where Jev fits.* Before a page publishes, one call with a battery: Score for depth against the page's own title promise; Noul for "does this page substantively differ from each of its five nearest template siblings" (pairwise against embedding neighbours); Noul for "makes a claim a reader could not verify from the page"; Noul for "would a person with this query find this page useful"; Nouls for brand risk; Choice for the final index, improve or kill. All of it in roughly 100 ms per page, which means it runs inside the generation pipeline as a CI step, not as a weekly report.
-
-*What stays in code.* Word counts, template fill ratios, shingling-based duplicate ratios, structured data checks, prohibited-term regexes. Your existing TradersYard gates (no placeholder text, no banned topics, no em dashes) are code checks and stay that way.
-
-*Why widen it.* The same battery is a QA gate for any AI-generated article, any agency draft, any translation. "Programmatic SEO" is the sharp wedge; "publish gate for high-volume content" is the market.
-
-*Pricing.* Per 10k pages checked, with a free tier generous enough that indie pSEO builders talk about it. An API plus a GitHub Action is the distribution. Sell the dashboard to teams.
-
-*Honest risk.* Some buyers will use a quality gate to make spam that passes. Position explicitly as "kill what is thin" with public thresholds aligned to Google's helpful-content guidance. That positioning is also what makes it a credible visa story.
-
-### 4. AI search visibility tracker
-
-**Verdict: a column in idea 1, not a product. Weak Jev fit, crowded market.**
-
-*Where Jev fits.* Given an AI answer (ChatGPT, Claude, Perplexity, Google AI Overviews) as state: Noul "is the brand cited", Choice "which cited source is primary", Score for sentiment toward the brand, and a battery over each cited competitor page to explain why it wins (answers the query in its first paragraph, has original data, shows an author, has FAQ structure, is a community thread). Aggregating those across queries in code gives you "citation drivers" and a recommended fix.
-
-*Why weak fit.* The hard, expensive part is collecting the AI answers at scale and keeping within platform terms. Jev's cheapness barely moves that cost. And the category already has well-funded players (Profound, Peec, Otterly, Scrunch, plus the AI toolkits in Semrush and Ahrefs).
-
-*What to do instead.* Add an "AI citation" signal to the per-URL verdict in idea 1 for the client's top 50 queries. It strengthens the platform's story (the same decisions that help you rank help you get cited) without taking on a data-acquisition business.
-
-### 5. Content brief and editorial decision desk
-
-**Verdict: the downstream action of idea 1. Jev decides, an LLM writes.**
-
-*Where Jev fits.* The decisions: go or no-go for a keyword given the SERP state (Noul "does this site plausibly have the authority to rank here"), Choice of format from what the SERP rewards, Choice of angle among candidate angles generated by an LLM, Score for length band, Noul per candidate source for "worth citing". Then it gates the LLM-written brief with the same publish-gate battery.
-
-*Why not standalone.* Brief writing is commoditised (Surfer, Frase, Clearscope, and every LLM wrapper). The decision layer is the differentiator, and the decision layer is idea 1. Ship this as the "expand" and "create" actions inside the engine.
-
-### 6. Link and digital PR opportunity filter
-
-**Verdict: a module. Good Jev fit, little novelty, expensive data.**
-
-*Where Jev fits.* Per prospect: Noul for topical relevance to the client, Choice for site type (news, independent blog, directory, link farm, forum), Score for editorial quality, Nouls for toxic signals (sells links, thin templated posts, unrelated outbound links), Choice for the best outreach angle. Per unlinked mention: Noul "worth claiming". Per competitor backlink: Noul "replicable".
-
-*What stays in code.* Domain rating, traffic, spam scores from Ahrefs (you have the API key), anchor distributions.
-
-*Why not standalone.* Outreach platforms (Pitchbox, BuzzStream, Respona) already own the workflow and will add a classifier. Ahrefs API costs dominate the unit economics. Add it to the platform when a client asks.
-
-### 7. Local SEO autopilot
-
-**Verdict: skip for now. Heaviest integration, strongest incumbents, least lived experience.**
-
-*Where Jev fits.* Per review: sentiment, theme, "needs a response", "violates platform policy and is worth reporting". Per location per week: Choice of the single most valuable action.
-
-*Why skip.* Google Business Profile API access and approval, review-platform integrations, and incumbents with sales teams (Birdeye, Yext, SOCi, Podium). NAP consistency is string comparison in code, not a judgment. The Jev-shaped part is small relative to the integration work, and it is not the problem you have lived.
-
----
-
-## 5. New ideas
-
-Scored the same way. These are ideas that only make sense because a judgment is now nearly free and fast enough for real time.
-
-| # | Idea | Jev fit | Novelty | Demand | Build ease | Moat | Visa story | Total |
-|---|---|---|---|---|---|---|---|---|
-| N1 | Claims and compliance gate for marketing copy | 5 | 4 | 4 | 3 | 4 | 5 | **25** |
-| N2 | Pairwise internal-linking and cannibalisation engine | 5 | 4 | 4 | 4 | 3 | 3 | **23** |
-| N3 | Creative pre-flight and real-time copy linter | 4 | 3 | 4 | 3 | 4 | 4 | 22 |
-| N4 | Action guardrail for marketing AI agents (open source) | 5 | 5 | 3 | 4 | 2 | 5 | **24** |
-| N5 | Inbound and reply triage for marketing and sales ops | 5 | 2 | 4 | 4 | 2 | 2 | 19 |
-| N6 | Community, review and UGC intelligence | 5 | 2 | 3 | 3 | 2 | 2 | 17 |
-| N7 | Edge personalisation decider | 4 | 4 | 3 | 2 | 3 | 4 | 20 |
-
-### N1. Claims and compliance gate for marketing copy
-
-**The lint step for marketing in regulated verticals.** Every ad, email, landing page, blog post and social post is checked before it ships against a battery of atomic questions encoded from the relevant rulebook: Does it promise a guaranteed outcome? Does it imply the product is risk-free? Does it use a superlative ("best", "number one") without substantiation on the page? Does it cite a statistic without a source? Is the required risk warning present (Noul) and prominent rather than buried (Score)? Does it name a competitor in a comparative claim? Does a testimonial imply typical results? Does it manufacture urgency with a deadline that is not real? For finance: does it present past performance as indicative of future results? For health: does it make a disease claim?
-
-*Why it is Jev-shaped.* Dozens of literal yes/no questions per piece, in one call, in 100 ms, so it works as you type in the editor and as a hard gate in the pipeline. Confidence gates the behaviour: high-confidence clean passes silently, medium flags the sentence, low routes to a reviewer. Every flag is explainable because it is a named question.
-
-*Why you.* TradersYard is a financial-promotions environment. You wrote the factual-accuracy rules, the two review gates, and the verified-facts source of truth by hand because no tool did it. The rulebooks (UK FCA financial promotions and the ASA CAP code, EU rules for your Vienna entity, FTC for US clients) become criteria libraries, which is both the work and the moat.
-
-*What stays in code.* Presence of an unsubscribe link, sender identity, regex for banned terms, character limits, reading age.
-
-*Positioning and risk.* It assists reviewers; it is not legal advice and must say so. Jev's documented weakness on adversarial text means a motivated copywriter could phrase around it; that is acceptable for an assistive gate and unacceptable for a legal guarantee, so never sell the latter. Price per workspace with seats, higher than SEO tooling because the buyer is avoiding fines and ad-account bans.
-
-*Visa angle.* Safety and trust in AI-assisted marketing, aligned to UK regulators, built on a new model class. This is the strongest "innovation" narrative in this document.
-
-### N2. Pairwise internal-linking and cannibalisation engine
-
-**The first thing Jev's price makes possible that was not possible before.** Internal linking and cannibalisation are pairwise problems: for every page, which other pages should it link to, with what anchor, and which pages compete with it for the same intent. Existing tools do this with keyword matching (Link Whisper) or entity graphs (InLinks). A semantic judgment on every candidate pair was too expensive; now it costs about two dollars per thousand pages.
-
-*How it works.* Embed every page (pgvector). For each page, take the top 30 candidates. For each pair, one Jev call with: Noul "would a reader of `page_a` at `paragraph_i` benefit from a link to `page_b`", Noul "does `page_b` target the same primary intent as `page_a`", Choice over anchor phrases extracted in code from `page_a`, and when overlap is high, Choice "which page should survive: a, b, or merge into a new page". Output: a link plan with anchors and insertion points, a cannibalisation list with a recommended direction, and a confidence on every row.
-
-*Why first.* It needs only a crawl, demos in minutes on any site, has an obvious before-and-after, and is the thing you fixed by hand at TradersYard. It produces the first decision logs for the platform.
-
-### N3. Creative pre-flight and real-time copy linter
-
-**Score 500 headline or subject-line variants in seconds, and lint copy as it is typed.** Decomposed rubric per variant: single clear promise, specificity, curiosity without clickbait, match to the stated awareness stage, brand-voice fit against a voice guide in the state, spam-trigger likelihood for email, and the compliance flags from N1. Each variant gets sub-scores and an aggregate computed in code, which makes the ranking explainable.
-
-*Why now.* Predictive copy scoring exists (Anyword, Persado, Phrasee) at enterprise prices with opaque scores. Jev's version is cheap, explainable, and real-time enough to live in the editor, which the LLM-latency generation of tools could not do.
-
-*The moat.* Connect Meta and Google Ads, Brevo, Omnisend, Klaviyo. Learn which sub-scores actually predict CTR and open rate for each account; recalibrate thresholds from outcomes. Note that competitor ad-library classification is already shipped by others (StealAds and similar); build pre-flight and outcome learning, not another ad library.
-
-### N4. Action guardrail for marketing AI agents (open source)
-
-**Auto mode for agents that touch marketing systems.** When an AI agent proposes an action (send this campaign to this segment, raise this budget, pause these ads, publish this post, delete this list, change this DNS record), Jev classifies it: Choice for reversibility, Score for blast radius (audience size bucketed in code), Noul "is this action consistent with the stated plan", Noul for brand risk, Noul for compliance risk (reusing N1 criteria). Code combines these into approve, confirm or block.
-
-*Why it is novel.* LangChain's AutoModeMiddleware and the community's Jevvy do this for shell commands. Nobody has done it with marketing stakes and marketing rulebooks, and agents are arriving in marketing stacks now (HubSpot, Meta, Google, Brevo, Omnisend all have agent surfaces or MCP servers).
-
-*Why open source.* Distribution and recognition. Ship it as middleware for LangChain and as a hook for Claude Code and MCP-based agents. Stars, forks and adoption are visa evidence; users of it are leads for N1.
-
-### N5. Inbound and reply triage for marketing and sales ops
-
-Form fills, chat messages, email replies and social DMs classified for intent, ICP fit against criteria in the state, urgency, objection type and language, then routed to a sequence or a person. Very strong Jev fit and immediate demand, but email triage was one of the first public Jev demos and every CRM is adding it. Build only as a module if a client needs it.
-
-### N6. Community, review and UGC intelligence
-
-Map-reduce over every review, Reddit thread, Discord message and support ticket: theme, sentiment, feature request, churn signal, competitor mention, brand risk, response priority. Aggregated weekly into decisions. Jev makes indie pricing possible against enterprise incumbents (Brandwatch, Sprinklr). Low novelty; good module for a community-heavy client such as a trading firm's Discord.
-
-### N7. Edge personalisation decider
-
-At request time, pass visitor context (referrer, UTM, prior pages, device, country) plus candidate variants, and let a Choice pick the headline, CTA or offer with confidence; fall back to the default below a threshold; log outcomes and feed a bandit. Jev's 100 ms fits an edge render budget for below-the-fold or streamed sections, but adds latency to the critical path if used carelessly. Innovative and visa-friendly, but it competes with Mutiny and Optimizely and needs privacy care. Park it until the platform has customers.
-
----
-
-## 6. What to build, in what order
-
-**Build one engine with two front doors.** The engine is: question batteries over content, confidence-gated routing, a decision log, and an outcome loop. The first front door is content operations (ideas 1, 3, N2, with 2, 5, 6 and the AI-citation column as later modules). The second front door is the compliance gate (N1). The open-source guardrail (N4) is the public face.
-
-**Lead with the content operations door** because you can dogfood it today on 118 published posts and a live SEO mandate, the outcome data starts accruing immediately, and SEO buyers are easy to reach from where you already are. Open the compliance door in months four to six on the same engine.
-
-**Flip the order only if the visa timeline dominates.** If you need innovation evidence within six months, lead with N1 and N4, because they read as safety and novelty to an assessor in a way an SEO audit tool does not.
-
-### First 30 days
-
-- Decision client: a thin TypeScript interface over the TypeSafe SDK with version pinning, logging of the reported model ID, and a fallback route (Requesty or Vercel gateway, and TypeSafe's System One LLM adapter).
-- Crawl and embed: Firecrawl or your own crawler into Supabase with pgvector.
-- Module A, publish gate: the battery in section 4.3 as an API endpoint and a GitHub Action. Run it over the TradersYard drafts folder on day one.
-- Module B, linking and cannibalisation: the pairwise flow in N2. Run it over the live blog and compare with the manual fixes you already made; that comparison is your first case study.
-- Decision log and outcome log tables (schema in section 7).
-- Calibration check: pick 200 pairs, judge them with a strong LLM and by hand, bucket Jev's probabilities, and see whether 0.8 means 80 percent.
-
-### Days 30 to 60
-
-- Search Console and GA4 OAuth; per-URL buckets computed in code; the full verdict battery (section 8) and the verdict rules.
-- Work queue with "act" and "hold as control" on each verdict, and a scheduled outcome check at 8 and 12 weeks.
-- First five external sites, at least two through an agency.
-- Publish the benchmark: a public set of content decisions (verdicts, link pairs, cannibalisation pairs) with Jev, two LLM judges and human SEO labels, with calibration plots. This is both marketing and visa evidence.
-
-### Days 60 to 90
-
-- Open-source N4 as LangChain middleware and a Claude Code hook, using a first compliance criteria set for financial promotions.
-- Pricing live: free tier on the publish gate, £79 to £399 for the platform, per-site pricing for agencies.
-- Start the N1 criteria libraries (UK FCA financial promotions and CAP code first) inside the same engine.
-
----
-
-## 6b. How the product looks, screen by screen
-
-One workspace per site or brand. Six screens. Every row on every screen carries a verdict, a confidence, and the atomic answers that produced it, so nothing is a black box.
-
-**1. Overview.** A single page per workspace. Top row: pages crawled, verdicts by type (refresh, merge, redirect, prune, expand, leave), open items in the queue, and what changed since the last nightly run. Below it, the outcome strip: for every verdict applied eight or more weeks ago, applied versus held-as-control, with click delta. This is the screen that proves the subscription pays for itself.
-
-**2. Verdict queue.** A table of URLs sorted by expected impact. Columns: URL, verdict, confidence, reasons (chips such as "intent mismatch 0.82", "thin 0.77", "clicks down 43 percent"), impressions band, and two buttons: Apply and Hold as control. Clicking a row opens the evidence panel: the filtered state that was sent, every atomic answer with its probability bar, and the rule that fired. A low-confidence verdict shows a "needs review" badge and cannot be auto-applied.
-
-**3. Link plan.** Left: the source page with paragraphs numbered. Right: suggested links, each with target page, anchor phrase, insertion paragraph, and the two probabilities behind it (reader benefit, same intent). Accept, edit anchor, or dismiss. A separate tab lists cannibalisation pairs with the recommended survivor and a merge direction. Export as CSV or push directly to Webflow or WordPress.
-
-**4. Publish gate.** Looks like a CI check. A list of drafts or generated pages, each with pass, flag or block, and the failing questions named. Filters for thin, duplicate, unverifiable claim, brand risk. Click through to the draft with flagged sentences highlighted. The same view is exposed as an API and a GitHub Action status, so pipelines block automatically on "kill".
-
-**5. Compliance gate (second front door).** The editor view: copy on the left, a live lint panel on the right that updates as you type (roughly 100 ms per check). Each flag names the rule family (guaranteed outcome, missing risk warning, unsubstantiated superlative, fake urgency), shows the probability, and quotes the sentence. Workspace settings choose the criteria library (UK FCA financial promotions, CAP code, FTC, health). A reviewer queue collects medium-confidence flags for a human.
-
-**6. Decision log and calibration.** For the owner, not the marketer. Every decision ever made, filterable by model version and criteria set. A calibration chart per question: predicted probability on the x-axis, observed accuracy against outcomes or human labels on the y-axis. Threshold sliders per verdict type show how many items would move between auto, review and blocked. This is the screen you screenshot for the visa file and for the benchmark post.
-
-### How a run works, end to end
-
-1. Nightly, or on demand, the worker crawls changed pages and re-embeds them.
-2. For each page, code computes the numeric buckets (trend, CTR band, position band, staleness) from Search Console and GA4.
-3. Code assembles a filtered state and the versioned question battery, and calls Jev once per page and once per candidate pair.
-4. Code combines the answers into a verdict with the rule set, stores every atomic answer in the decision log, and places the verdict in the queue.
-5. The user applies or holds each verdict. Applied verdicts push changes through the CMS connector or export a task list.
-6. At eight and twelve weeks the worker records outcomes for applied and held items, and the calibration screen updates.
-
-## 7. Reference architecture
-
-Stack matches your preference: Next.js and Supabase.
-
-```
-Next.js (app, API routes, GitHub Action client)
-   |
-   |-- Decision client (thin interface)
-   |      |-- TypeSafe SDK  -> jev-1.13.0 (pinned)
-   |      |-- Fallback route -> Requesty / Vercel AI Gateway
-   |      |-- LLM fallback   -> System One LLM adapter (same contract)
-   |
-   |-- LLM client (Claude) -> briefs, prose reasons, angle candidates only
-   |
-Supabase (Postgres)
-   |-- pages, keywords, queries, pairs          (entities)
-   |-- embeddings (pgvector)                    (candidate generation)
-   |-- decisions                                (every Jev answer)
-   |-- verdicts                                 (code-combined outcome per entity)
-   |-- actions                                  (what the user did, or held as control)
-   |-- outcomes                                 (metrics at +8w and +12w)
-   |-- criteria_sets                            (versioned question batteries)
-   |
-Workers (Inngest, Trigger.dev or pg_cron)
-   |-- crawl -> filter -> embed -> ask -> combine -> log
-   |-- scheduled outcome checks
-Connectors
-   |-- Search Console, GA4, Ahrefs, Webflow/WordPress, Meta/Google Ads, Brevo/Omnisend
-```
-
-### Decision log schema (minimum)
-
-```sql
-create table decisions (
-  id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null,
-  entity_type text not null,        -- 'page' | 'pair' | 'keyword' | 'copy' | 'action'
-  entity_id text not null,
-  criteria_set_version text not null,
-  model_version text not null,      -- as reported in the response, e.g. 'jev-1.13.0'
-  question_key text not null,
-  answer jsonb not null,            -- choice/score/noul + probabilities
-  confidence numeric,               -- derived for nouls as |2p-1|
-  state_hash text not null,         -- to dedupe and to audit what was sent
-  created_at timestamptz default now()
-);
-
-create table verdicts (
-  id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null,
-  entity_type text not null,
-  entity_id text not null,
-  verdict text not null,            -- 'refresh' | 'merge' | 'redirect' | 'prune' | 'expand' | 'leave'
-  rule_version text not null,
-  min_confidence numeric,
-  reasons jsonb not null,           -- the atomic answers that fired
-  created_at timestamptz default now()
-);
-
-create table actions (
-  id uuid primary key default gen_random_uuid(),
-  verdict_id uuid references verdicts(id),
-  status text not null,             -- 'applied' | 'held_as_control' | 'rejected'
-  applied_at timestamptz
-);
-
-create table outcomes (
-  id uuid primary key default gen_random_uuid(),
-  action_id uuid references actions(id),
-  horizon_weeks int not null,       -- 8 or 12
-  clicks_delta_pct numeric,
-  impressions_delta_pct numeric,
-  position_delta numeric,
-  measured_at timestamptz default now()
-);
-```
-
-### The calibration loop
-
-1. Every verdict stores the atomic answers and the model version.
-2. Every verdict is either applied or held as a matched control.
-3. Outcomes are measured at fixed horizons for both groups.
-4. A small classical model (logistic regression is enough to start) learns which atomic probabilities predict a positive outcome per site type, following TypeSafe's AutoResearch cookbook pattern.
-5. Thresholds and verdict rules are re-tuned per model version. When TypeSafe ships a new Jev, you re-run the labelled set before moving the pin.
-
----
-
-## 8. Worked example: the per-URL verdict request
-
-The request shape below follows the documented API (`POST /v1/systemone` with `model`, `state`, `questions`). Verify field names against the API reference before shipping; the point here is the decomposition.
-
-Everything numeric has already been computed in code and passed as a bucket. Sibling pages are the five nearest by embedding.
-
-```json
-{
-  "model": "jev-1.13.0",
-  "state": {
-    "page": {
-      "url": "/blog/what-is-a-prop-firm",
-      "title": "What Is a Prop Firm? A Plain-English Guide",
-      "h1": "What is a prop firm?",
-      "meta_description": "Prop firms explained: how funded accounts work, what evaluations test, and what traders actually get paid.",
-      "headings": ["How prop firms make money", "Evaluations and challenges", "Profit splits", "Risks for traders"],
-      "intro": "A proprietary trading firm, or prop firm, gives traders access to a funded account in exchange for passing an evaluation ... (first 1,200 characters)",
-      "author_shown": true,
-      "last_updated_text": "Updated January 2025"
-    },
-    "search": {
-      "top_queries": ["what is a prop firm", "prop firm meaning", "how do prop firms work", "prop firm vs broker"],
-      "ctr_band": "below_expected_for_position",
-      "position_band": "page_one_lower_half",
-      "click_trend_12m": "declining_sharply",
-      "impressions_band": "high"
-    },
-    "sibling_pages": [
-      {"key": "s0", "url": "/blog/prop-firm-explained", "title": "Prop Firms Explained for Beginners"},
-      {"key": "s1", "url": "/blog/how-prop-firms-work", "title": "How Prop Firms Work in 2025"},
-      {"key": "s2", "url": "/blog/prop-firm-vs-broker", "title": "Prop Firm vs Broker: Key Differences"},
-      {"key": "s3", "url": "/blog/funded-trading-accounts", "title": "Funded Trading Accounts: The Basics"},
-      {"key": "s4", "url": "/blog/prop-firm-challenge-tips", "title": "10 Tips to Pass a Prop Firm Challenge"}
-    ]
-  },
-  "questions": {
-    "page_intent": {
-      "type": "choice",
-      "instructions": "Which search intent does `page` primarily serve, judging from `page.title`, `page.h1`, `page.headings` and `page.intro`?",
-      "criteria": {
-        "informational": "Explains a concept or answers a question; no purchase step on the page",
-        "commercial_investigation": "Compares options or helps the reader choose between providers",
-        "transactional": "Leads directly to signing up, buying or starting an evaluation",
-        "navigational": "Exists mainly so a reader can reach a specific brand page"
-      }
-    },
-    "query_intent": {
-      "type": "choice",
-      "instructions": "Which search intent do the queries in `search.top_queries` primarily express?",
-      "criteria": {
-        "informational": "The searcher wants an explanation or definition",
-        "commercial_investigation": "The searcher is comparing options before choosing",
-        "transactional": "The searcher wants to sign up or buy now",
-        "navigational": "The searcher is looking for a specific brand or page"
-      }
-    },
-    "title_matches_queries": {
-      "type": "noul",
-      "instructions": "Does `page.title` directly promise an answer to `search.top_queries[0]`?"
-    },
-    "intro_answers_directly": {
-      "type": "noul",
-      "instructions": "Does `page.intro` give a direct answer to `search.top_queries[0]` within its first two sentences, before any background?"
-    },
-    "depth": {
-      "type": "score",
-      "instructions": "How thoroughly do `page.headings` and `page.intro` cover what a reader asking `search.top_queries[0]` would want to know?",
-      "criteria": [
-        "Thin: restates the question or gives a one-line definition with no specifics",
-        "Partial: covers the basics but misses obvious sub-questions such as costs, rules or risks",
-        "Thorough: covers the basics and the obvious sub-questions with concrete specifics"
-      ]
-    },
-    "shows_first_hand_experience": {
-      "type": "noul",
-      "instructions": "Does `page.intro` contain evidence of first-hand experience, such as specific results, screenshots described, or named personal examples, rather than general explanation only?"
-    },
-    "contains_time_sensitive_claims": {
-      "type": "noul",
-      "instructions": "Does `page.intro` or any item in `page.headings` make a claim about prices, rules, rankings or a specific year that is likely to become outdated within a year?"
-    },
-    "overlap_s0": {"type": "noul", "instructions": "Would `sibling_pages[0]` satisfy the same `search.top_queries` as `page`, judging by its title?"},
-    "overlap_s1": {"type": "noul", "instructions": "Would `sibling_pages[1]` satisfy the same `search.top_queries` as `page`, judging by its title?"},
-    "overlap_s2": {"type": "noul", "instructions": "Would `sibling_pages[2]` satisfy the same `search.top_queries` as `page`, judging by its title?"},
-    "overlap_s3": {"type": "noul", "instructions": "Would `sibling_pages[3]` satisfy the same `search.top_queries` as `page`, judging by its title?"},
-    "overlap_s4": {"type": "noul", "instructions": "Would `sibling_pages[4]` satisfy the same `search.top_queries` as `page`, judging by its title?"},
-    "best_consolidation_target": {
-      "type": "choice",
-      "instructions": "If `page` were merged into one of `sibling_pages`, which sibling is the best home for its content?",
-      "criteria": {
-        "s0": "Prop Firms Explained for Beginners",
-        "s1": "How Prop Firms Work in 2025",
-        "s2": "Prop Firm vs Broker: Key Differences",
-        "s3": "Funded Trading Accounts: The Basics",
-        "s4": "10 Tips to Pass a Prop Firm Challenge",
-        "none": "No sibling is a suitable home; the page should stay separate"
-      }
-    },
-    "misleading_outcome_claim": {
-      "type": "noul",
-      "instructions": "Does `page.intro` state or imply that a trader is guaranteed, or very likely, to get funded or to profit?"
-    }
-  }
-}
-```
-
-Combining the answers in code (TypeScript sketch):
-
-```ts
-type Answers = Record<string, { choice?: string; score?: number; noul?: number; confidence?: number }>;
-
-function verdictFor(a: Answers, m: Metrics, siblings: SiblingMetrics[]): Verdict {
-  const sure = (q: string, t = 0.6) => (a[q].confidence ?? Math.abs(2 * (a[q].noul ?? 0.5) - 1)) >= t;
-
-  const intentMismatch = a.page_intent.choice !== a.query_intent.choice && sure("page_intent") && sure("query_intent");
-  const thin = (a.depth.score ?? 2) < 1 && sure("depth");
-  const overlaps = siblings.filter((_, i) => (a[`overlap_s${i}`].noul ?? 0) > 0.8);
-  const strongerSibling = overlaps.find((s) => s.clicks12m > m.clicks12m * 1.5);
-  const stale = m.clickTrend12m === "declining_sharply" && (a.contains_time_sensitive_claims.noul ?? 0) > 0.7;
-  const dead = m.clicks12m === 0 && m.impressions12m < 50 && m.referringDomains === 0;
-
-  if (strongerSibling) {
-    const target = a.best_consolidation_target;
-    return target.choice !== "none" && (target.confidence ?? 0) > 0.7
-      ? { verdict: "merge", into: target.choice, needsReview: false }
-      : { verdict: "merge", into: null, needsReview: true };
-  }
-  if (dead) return { verdict: "prune_or_redirect", needsReview: true };          // irreversible: always review
-  if (intentMismatch && m.impressions12m > 500) return { verdict: "rewrite_for_intent", needsReview: false };
-  if (thin && m.impressions12m > 500) return { verdict: "expand", needsReview: false };
-  if (stale) return { verdict: "refresh", needsReview: false };
-  return { verdict: "leave", needsReview: false };
-}
-```
-
-The `reasons` column is simply the atomic answers that fired, rendered as "Query intent informational, page intent commercial (confidence 0.82); depth thin (0.77); clicks down 43 percent in 12 months". No text generation, fully auditable, and the same fields feed the calibration model later.
-
----
-
-## 9. Economics
-
-Token counts are estimates for a hard-filtered state as in section 8 (roughly 2.5k tokens of state plus 1k of questions). Measure on your own data.
-
-| Workload | Decisions | Tokens | Jev cost | Wall time at 100k tokens/s |
+| Persona | Who they are | Job to be done | Pain today | Modules they buy first |
 |---|---|---|---|---|
-| Full-site verdict, 10k URLs | 10k calls, 13 questions each | ~35M | ~$1.50 | ~6 minutes |
-| Linking and cannibalisation, 1k pages × 30 candidates | 30k pair calls | ~45M | ~$1.90 | ~8 minutes |
-| Publish gate, 50k programmatic pages | 50k calls | ~125M | ~$5.25 | ~21 minutes |
-| Copy pre-flight, 500 variants × 8 rubric questions | 500 calls | ~0.5M | ~$0.02 | seconds |
-| Compliance gate, 2k pieces a month | 2k calls | ~4M | ~$0.17 | real time |
+| Agency SEO lead ("Priya") | Runs 10 to 30 client accounts, 2 to 6 juniors | Decide what to work on each month per client and justify it in a report | Audits take days, juniors make inconsistent calls, clients ask "did it work?" | 1, 5, 2 |
+| In-house ecommerce SEO ("Tom") | Owns 50k to 500k URLs, small team, pressure from marketing director | Keep index quality high and stop traffic decay across thousands of pages | Can't review every page; prunes by gut; fears Google quality updates | 1, 3, 2 |
+| Programmatic SEO builder ("Dayo") | Founder or growth engineer generating pages from data | Publish at scale without getting the site penalised | No tool judges page quality before indexing | 3, 1 |
+| Content strategist ("Lena") | Plans 20 to 100 briefs a month for writers | Decide which keywords deserve content and what shape | Briefs are slow, formulaic, and often target the wrong intent | 5, 2 |
+| Digital PR / outreach manager ("Sam") | Runs link campaigns, 3 to 10 seats | Spend outreach hours only on prospects that will convert | Hours lost on dead or toxic prospects | 6 |
+| Brand or growth marketer ("Aisha") | B2B SaaS or DTC, cares about AI answers | Know whether the brand shows up in ChatGPT and why competitors win | Current trackers show scores but not reasons or fixes | 4 |
+| Multi-location operator ("Mark") | Franchise, clinic group or estate agency with 10 to 300 locations | Keep every location's profile, reviews and posts healthy | Can't scale attention across locations; relies on local managers | 7 |
 
-Two implications. First, model cost is a rounding error at every price point above, so price on value and on the data you accumulate, not on tokens. Second, a full-site run completes in minutes, which means "continuous" is literal: re-evaluate nightly and show the user what changed.
+**Buyer vs user.** At agencies the buyer is the owner or head of SEO and the daily user is a junior or mid-level executive. The product must make juniors produce senior-quality decisions and give the owner a client-ready report.
 
-TypeSafe's own headline comparison (193.6× faster, 444.6× cheaper than frontier LLMs on their workflow evals) is vendor-run and, by their own note, at the upper end of real-world gains. Benchmark the swap on your workload before quoting it.
+**Not for.** Hobby bloggers under 200 URLs, enterprises needing SSO and procurement, and anyone wanting a content writer first (writing is a downstream integration, not the product).
 
----
+## 3. Goals, non-goals and success metrics
 
-## 10. What is already crowded or already shipped
+### Goals (first 12 months)
 
-Avoid building a demo someone shipped in launch week.
+1. Ship Module 1 as a paid MVP within 90 days and reach 30 paying accounts by month 6.
+2. Prove the closed loop: show that verdicts with confidence above 0.8 are right at least 80% of the time, measured against real outcomes at 90 days.
+3. Reach £15k MRR by month 12 across Modules 1, 2 and 3.
+4. Build an outcome ledger of at least 100,000 scored decisions with measured results, the dataset no competitor has.
+5. Produce evidence (traction, UK customers, UK hires planned) that supports an Innovator Founder endorsement.
 
-| Already public on Jev (Sept 2026) | Who | Implication |
+### Non-goals
+
+- Not a rank tracker, crawler or backlink index. We integrate with Search Console, GA4, and third-party crawl and link data rather than rebuilding them.
+- Not a content writer. We produce briefs and verdicts; writing happens in the customer's tools or via integration.
+- Not an enterprise platform in year one: no SSO, no on-premise, no custom contracts.
+- Not a chat assistant. Every interaction is a structured decision, not a conversation.
+
+### Success metrics
+
+| Metric | Definition | Target at month 6 | Target at month 12 |
+|---|---|---|---|
+| Paying accounts | Active subscriptions | 30 | 120 |
+| MRR | Monthly recurring revenue | £4k | £15k |
+| Decision accuracy | Share of verdicts (confidence ≥ 0.8) confirmed correct by outcome at 90 days | 75% | 85% |
+| Calibration error | Gap between stated confidence and observed accuracy, averaged across buckets | ≤ 0.10 | ≤ 0.05 |
+| Verdict acceptance | Share of verdicts customers approve without change | 60% | 75% |
+| Time to first verdict | Minutes from connecting Search Console to first scored URL list | ≤ 20 | ≤ 10 |
+| Weekly active accounts | Accounts that review or action a verdict in the week | 70% | 80% |
+| Net revenue retention | Month-12 revenue from month-0 cohort | n/a | 100% |
+| Gross margin | Revenue minus model, crawl and infrastructure costs | 75% | 85% |
+
+## 4. Platform architecture
+
+Data flows down through one shared decision engine into the seven modules and out to a work queue; the outcome ledger measures each executed decision and the dashed loop feeds those results back to recalibrate thresholds.
+
+### Components
+
+- **Ingestion.** OAuth connectors for Google APIs, scheduled syncs, CSV and export importers, a crawler for sites up to 100k URLs. All data normalised to a per-account item store (URL, keyword, page, prompt, prospect, location).
+- **Decision engine.** A typed decision contract (state, options, question) routed through hard rules first, then a provider-abstracted decision model, then the confidence router. Every call is logged with model version and latency.
+- **Modules.** Thin workflow layers: each defines its item type, its decisions, its review screens and its execution hooks. New modules reuse the engine and ledger without changes to either.
+- **Work queue.** Shared task model across modules with owner, status, due date, export and integrations.
+- **Outcome ledger.** Append-only record joining each decision to its measured result. Weekly calibration jobs produce per-module reliability curves and adjust per-account thresholds within guardrails.
+
+**Stack (proposed).** TypeScript end to end: Next.js app, Postgres with a queue table and worker processes for batch scoring, Redis for job scheduling, object storage for crawl snapshots, Playwright workers for AI Overviews capture. Hosted in a UK or EU region.
+
+## 5. Module 1: Content Decision Engine (flagship)
+
+Every URL on a connected site receives one of six verdicts, with a reason, a confidence score and an expected traffic impact, refreshed weekly. This is the MVP and the module every customer starts on.
+
+### Inputs
+
+- Google Search Console (clicks, impressions, CTR, position by page and query, 16 months)
+- GA4 (sessions, engagement, conversions by landing page)
+- Site crawl (status codes, canonicals, word count, headings, internal links, last modified, templates). Built-in crawler up to 100k URLs; Screaming Frog or Sitebulb export import above that
+- Optional: Ahrefs or Semrush keyword and backlink export per URL
+
+### Verdicts
+
+| Verdict | Meaning | Typical signals |
 |---|---|---|
-| Ad library classification (724 ads, 37 brands, 40 seconds, 9 cents) | Matthew Berman, heading into StealAds | Build pre-flight and outcome learning, not another ad library |
-| Newsjacking triage (384 headlines for 15 brands, $0.19) | Elvis Sun | Fine as a module; not a company |
-| Email triage at scale | Ryan Vogel and others | N5 is a module |
-| Browser agents (Browser Use, Hunch, Cline, Browserbase) | Several | Not your lane |
-| Permission gating for coding agents (Jevvy, LangChain AutoMode) | Community, LangChain | N4 is the marketing-specific version; cite them as prior art |
-| Judge replacement and eval arenas (JevArena, JevGraph) | Community | Your content-decisions benchmark follows this pattern in a new domain |
-| Open-weight imitations of the API contract (Laya and others) | r/LocalLLaMA | The contract is not a moat; your criteria libraries and outcome data are |
+| Refresh | Keep URL, update content | Impressions stable, clicks or position decaying, content older than 12 months, top-10 competitors updated recently |
+| Expand | Keep URL, add depth | Ranks 8 to 20 for high-volume queries, thin against competing pages, strong internal links |
+| Merge | Combine into a stronger sibling | Two or more URLs competing for the same queries (cannibalisation), one clearly weaker |
+| Redirect | 301 to the best match | No traffic, has backlinks or historic equity, close topical match exists |
+| Prune | Remove and 410 | No traffic, no links, no conversions, not a legal or navigational page, thin or duplicate |
+| Leave | No action | Performing to potential, recently updated, or protected page type |
 
-Crowded without Jev: keyword clustering, brief writing, AI visibility tracking, local SEO suites, outreach platforms. Enter those only as modules.
+**Decision design.** The engine does not ask a model to "audit the page". It frames each URL as a typed decision with a closed set of options and a state object (metrics deltas, crawl facts, cannibalisation pairs, page type). The decision model returns the option and a calibrated probability. Rules handle hard constraints first (legal pages, pages with conversions above a threshold, pages under 30 days old are never pruned).
 
----
+### Confidence handling
 
-## 11. The Tech Nation angle
+- ≥ 0.85: auto-approved into the work queue, customer can still override
+- 0.60 to 0.84: shown as "needs review", one-click approve or change
+- < 0.60: grouped as "uncertain", with the two most likely verdicts and what evidence would settle it
+- Prune and Redirect always require explicit approval regardless of confidence in the first 90 days of an account
 
-Assessors look for evidence of innovation, impact and recognition in digital technology. Concrete artefacts this plan produces:
+**Expected impact.** For each verdict the engine estimates 90-day click change as a range (for example +120 to +340 clicks a month) using the site's own CTR curve by position and the queries the URL already appears for. Shown as a range, never a single number.
 
-- A shipped product on a new model class (System One) with paying users and measurable outcomes (traffic recovered, pages consolidated, compliance flags caught before publication).
-- An open-source guardrail with adoption metrics (stars, forks, downloads, named teams using it).
-- A public benchmark of content and compliance decisions comparing Jev, LLM judges and human experts, with calibration analysis. Benchmarks get cited.
-- Talks and posts on applying decision models to marketing safety and content operations, a topic with almost no literature yet.
-- Letters from agency and brand users describing the before and after.
+**Work queue.** Approved verdicts become tasks with owner, due date, status and a brief: for Refresh and Expand, the queries to target, sections to add and competitor pages to beat; for Merge and Redirect, the target URL and redirect rule; for Prune, the 410 list. Export to CSV, Asana, Trello, Notion and a redirect file for common platforms.
 
-The compliance gate (N1) and the agent guardrail (N4) carry the innovation and safety narrative. The content platform carries the impact and revenue narrative. Build both on one engine and the file writes itself.
+**Outcome tracking.** When a task is marked done, the engine records the date and compares the following 30, 60 and 90 days against the forecast. Each decision is labelled worked, neutral or backfired. Results feed the account's report and the platform calibration layer.
 
----
+### User stories
 
-## 12. Risks and dependencies
+- As an agency lead, I connect a client's Search Console and within 20 minutes see every URL scored, so I can present a prioritised plan in the first call.
+- As an in-house SEO, I review only the 40 uncertain pages a week instead of 4,000, so I can keep index quality without a bigger team.
+- As an agency owner, I send a monthly report showing which decisions worked and the traffic they added, so I can justify the retainer.
 
-- **Early access.** Jev is in early access with dynamic rate limits and a waitlist. Mitigate with the decision-client abstraction, a gateway route, and the System One LLM adapter so the product keeps working if limits bite.
-- **Alias drift.** `jev-latest` moves when a release ships. Pin `jev-1.13.0`, log the reported version, re-run the labelled set before moving.
-- **English first.** Non-English content gets lower accuracy. Gate harder on confidence for non-English workspaces and say so in the UI.
-- **Adversarial text.** Jev does not treat state as hostile. The compliance gate is assistive, never a guarantee; the agent guardrail is defence in depth, never the only control.
-- **Vendor concentration.** One model, one company. The open clones and the adapter mean the request shape survives even if the vendor does not.
-- **Search is changing.** SEO tooling faces a shrinking pie as answers move into AI surfaces. The decisions this engine makes (is this page the clearest, most direct, most trustworthy answer to this query) are the same decisions that drive AI citation, which is why the AI-citation column belongs in the platform.
-- **Legal positioning for N1.** Clear disclaimers, a human in the loop by default, and criteria libraries reviewed by a compliance professional before launch in each vertical.
+### Acceptance criteria (MVP)
 
----
+- [ ] Connect Search Console and GA4 via OAuth in under 5 minutes
+- [ ] Crawl or import up to 100k URLs and join to performance data by canonical URL
+- [ ] Every URL receives a verdict, reason, confidence and impact range
+- [ ] Cannibalisation detection flags URL pairs sharing ≥ 3 top-20 queries
+- [ ] Review screen filters by verdict, confidence, template and traffic
+- [ ] Work queue with status, export to CSV and a redirect file
+- [ ] Outcome tracking marks each completed task worked, neutral or backfired at 90 days
+- [ ] Monthly PDF report per site
 
-## 13. Sources
+**Out of scope for MVP.** Automatic publishing of changes, CMS write-back, multi-language sites, JavaScript-rendered crawling.
 
-- TypeSafe AI, "Introducing System One Models & Jev" (launch post): https://typesafe.ai/blog/introducing-system-one-models-and-jev
-- TypeSafe docs, Introduction: https://docs.typesafe.ai/introduction
-- TypeSafe docs, Models (pricing, limits, aliases): https://docs.typesafe.ai/models
-- TypeSafe docs, Confidence: https://docs.typesafe.ai/confidence
-- TypeSafe docs, State: https://docs.typesafe.ai/concepts/state
-- TypeSafe docs, How to build with TypeSafe: https://docs.typesafe.ai/concepts/how-to-build-with-system-one
-- TypeSafe docs, Patterns (fan-out, confidence routing, composite scoring, intent routing): https://docs.typesafe.ai/patterns
-- TypeSafe docs, Jev 1.13 jaggedness (failure modes): https://docs.typesafe.ai/model-jaggedness/jev-1.13
-- TypeSafe, System One LLM adapter (fallback that returns the same contract from an LLM): https://github.com/typesafe-ai/system-one-adapter-python
-- LangChain, "Building a Harness with Jev" (TypeSafeClassifier, model routing, AutoModeMiddleware): https://www.langchain.com/blog/building-a-harness-with-jev
-- Requesty, "TypeSafe Jev explained" (pricing, access, early demos): https://www.requesty.ai/blog/typesafe-jev-explained
-- Requesty, "Jev, week two" (gateways, community builds, open clones, evaluation advice): https://www.requesty.ai/blog/jev-week-two-four-gateways-open-clones-what-builders-shipped
+## 6. Module 2: Keyword Intent and Clustering
 
----
+Paste or import up to 50,000 keywords and get them clustered by topic, intent and buying stage, mapped to existing URLs, with cannibalisation warnings, in under 10 minutes.
 
-*Next revision: add the calibration results from the first 200-pair check, and the TradersYard before-and-after for the linking module.*
+**Inputs.** CSV or paste (keyword, volume, CPC, current URL and position optional); direct import from Search Console queries; Ahrefs or Semrush export.
+
+### Decisions per keyword
+
+| Decision | Options | Notes |
+|---|---|---|
+| Intent | Informational, commercial investigation, transactional, navigational, local, junk | Junk catches misspellings, brand of competitor, irrelevant |
+| Buying stage | Awareness, consideration, decision, retention | Drives content format later |
+| Topic cluster | Assigned to an existing cluster or opens a new one | Embeddings for candidate clusters, decision model to confirm membership |
+| Page mapping | Existing URL, new page needed, or fold into existing page | Uses Module 1 crawl when connected |
+| SERP shape (optional) | Blog, product, category, tool, video, local pack | From a sampled SERP fetch for cluster heads only, to control cost |
+
+### Outputs
+
+- Cluster view: cluster name, total volume, dominant intent, mapped URL, gap flag
+- Cannibalisation list: clusters mapped to more than one URL, with the recommended primary
+- Export to CSV and directly into Module 5 as brief candidates
+
+**Why we win.** Existing clustering tools either rely on SERP overlap for every keyword (slow and costly) or pure embeddings (groups by wording, not intent). Running a cheap calibrated decision per keyword lets us cluster by intent and stage at a per-keyword cost under £0.0001, so we can price at £49 to £199 a month and still hold 85%+ margin.
+
+### Acceptance criteria
+
+- [ ] 50,000 keywords processed in under 10 minutes
+- [ ] Intent agreement with a human-labelled 500-keyword benchmark ≥ 90%
+- [ ] Clusters editable: drag keywords between clusters, merge and rename
+- [ ] Cannibalisation warnings link to the two URLs and the shared queries
+- [ ] Re-run on an updated list keeps existing cluster names stable
+
+## 7. Module 3: Programmatic SEO Quality Gate
+
+Every generated page is scored before it is published and receives Index, Improve or Kill, so sites can scale to tens of thousands of pages without triggering helpful-content or spam penalties.
+
+**How it fits.** Customers send pages via API, CSV, sitemap or a CMS webhook (Webflow, WordPress, Next.js build hook) before or at publish time. The gate returns a verdict in under two seconds per page and a batch report for bulk runs.
+
+### Scoring dimensions
+
+| Dimension | What is checked | Signal source |
+|---|---|---|
+| Thinness | Unique, useful content beyond the template | Word count outside template, unique facts, data density |
+| Duplication | Near-duplicate of a sibling page | Shingling and embeddings against the batch and the existing site |
+| Helpfulness | Would a searcher with this query be satisfied | Decision model with the target query and page as state |
+| Search demand | Is there any query this page can win | Keyword data and Search Console for the pattern |
+| Brand and legal risk | Claims, regulated terms, broken facts, placeholder text | Rules plus decision model |
+| Technical | Canonical, title and H1 uniqueness, internal links in and out | Crawl of the generated page |
+
+**Verdicts.** Index (publish and allow indexing), Improve (publish noindex or hold, with the specific fixes), Kill (do not publish, with the reason). Each carries a confidence score and the three strongest reasons.
+
+**Batch intelligence.** Beyond per-page verdicts, the gate reports on the template: share of pages killed, the most common failure, and whether the pattern as a whole should be paused. A template with more than 40% Kill is flagged before any page ships.
+
+**Pricing basis.** Per 10,000 pages scored, with a monthly minimum. Re-scoring an edited page within 30 days is free.
+
+### Acceptance criteria
+
+- [ ] API, CSV and sitemap ingestion; WordPress and Webflow webhook
+- [ ] Verdict in under 2 seconds per page, 10,000 pages in under 30 minutes
+- [ ] Kill decisions agree with a human reviewer ≥ 85% on a 300-page benchmark
+- [ ] Template-level report with pause recommendation
+- [ ] Post-publish check: pages marked Index that later lose impressions are fed back as outcomes
+
+## 8. Module 4: AI Search Visibility Tracker
+
+Tracks whether a brand is mentioned or cited in ChatGPT, Claude, Perplexity, Gemini and Google AI Overviews for its target prompts, explains why a competitor won each one, and recommends a fix with a confidence score. The explain-and-fix layer is the differentiator; existing trackers (Profound, Peec, Otterly) stop at scores.
+
+### How tracking works
+
+1. Prompt set: 50 to 500 buyer-style prompts per brand, generated from the customer's keyword clusters (Module 2) and edited by the user.
+2. Scheduled runs: daily on paid plans, each prompt sent to every engine via API where one exists (OpenAI, Anthropic, Perplexity, Gemini) and via headless browser for Google AI Overviews and AI Mode. Each prompt runs 3 times per engine to average out volatility.
+3. Answer parsing: for every answer, decisions on brand mentioned (yes/no), citation present (URL), position in answer, sentiment, and the source types that won (vendor page, review site, Reddit, news, directory).
+4. Aggregation: visibility rate, citation rate, share of voice against named competitors, trend over time.
+
+**The "why" layer.** For every prompt the brand loses, a decision on the most likely reason from a closed set: no page covers the question; page exists but is not cited by the sources engines trust; competitor has third-party coverage (reviews, Reddit, listicles) and we do not; brand entity is weak (no Wikipedia, inconsistent descriptions); content is behind a wall or blocked to AI crawlers. Each reason maps to a recommended fix and an owner (content, PR, technical).
+
+**Crawler signal.** Optional log-file or Cloudflare integration shows which AI bots (GPTBot, ClaudeBot, PerplexityBot) actually fetch which pages, so a loss can be split into "never fetched" versus "fetched but not chosen".
+
+### Outputs
+
+- Visibility dashboard by engine, prompt group and competitor
+- Loss register: prompt, winning competitor, reason, fix, confidence, status
+- Weekly change alerts when visibility moves more than 10 points
+- Fixes push into Module 5 (briefs) and Module 6 (PR targets)
+
+**Cost control.** Answer parsing is the expensive step at scale (500 prompts × 5 engines × 3 runs × 30 days = 225,000 answers a month per brand). All classification runs on the decision model; a general LLM is only used for the "why" on newly lost prompts.
+
+### Acceptance criteria
+
+- [ ] Five engines tracked, daily, with 3-run averaging
+- [ ] Mention and citation detection ≥ 95% agreement with manual check on 200 answers
+- [ ] Every lost prompt has a reason and a fix with confidence
+- [ ] Competitor set of up to 5 brands per account
+- [ ] Outcome loop: when a fix is marked done, the prompt's visibility 30 days later is recorded against it
+
+## 9. Module 5: Content Brief and Editorial Decision Desk
+
+For every target keyword or cluster, the desk decides whether to create content at all and, if so, the format, angle, length, structure and sources, producing a writer-ready brief in under a minute.
+
+### Decisions per target
+
+| Decision | Options | Inputs |
+|---|---|---|
+| Go / no-go | Create, expand existing, skip | Cluster volume, difficulty, existing coverage (Module 1), business relevance score set by the customer |
+| Format | Guide, comparison, listicle, tool page, product or category page, FAQ, video-first, template | SERP shape sample, intent, buying stage |
+| Angle | Closed set generated per cluster, for example "for UK freelancers", "vs the market leader", "with calculator" | Competitor gap analysis on the top 10 |
+| Length band | 600 to 900, 1,000 to 1,500, 1,800 to 2,500, 3,000+ words | Top-10 median and intent |
+| Structure | Ordered list of H2s and the questions each must answer | People Also Ask, competitor headings, Module 4 lost prompts |
+| Sources | 3 to 8 citations the piece should reference, with first-party data suggestions | Search and the customer's own data connectors |
+| Internal links | Pages to link to and from | Module 1 crawl |
+
+**Brief output.** Title options, target queries, format, angle, length, outline with per-section notes, sources, internal links, and a "what makes this better than the top 3" line. Exported to Google Docs, Notion, Markdown or pushed to a writing tool via API.
+
+**Editorial queue.** Briefs sit in a Kanban: proposed, approved, in writing, published, measured. Publishing links the brief to a URL so Module 1 can track the outcome and label the brief worked or not after 90 days.
+
+**Why we win.** Agencies pay a strategist to make these calls at £40 to £80 an hour; the desk makes them consistently and shows its reasoning, so a junior can run the queue. Over time, brief outcomes train which formats and angles win in each vertical.
+
+### Acceptance criteria
+
+- [ ] Brief generated in under 60 seconds from a cluster
+- [ ] No-go recommendations shown with the reason and what would change the call
+- [ ] Outline agreement with a strategist's outline ≥ 80% on a 50-brief benchmark
+- [ ] Export to Google Docs and Notion
+- [ ] Published URL linked back and outcome recorded at 90 days
+
+## 10. Module 6: Link and Digital PR Opportunity Filter
+
+Every link prospect, unlinked mention and competitor backlink is scored Pursue, Skip or Toxic with a confidence and a suggested pitch angle, so outreach teams spend hours only on prospects likely to convert.
+
+**Inputs.** Competitor backlink exports (Ahrefs, Semrush, Majestic), brand mention alerts (web search, news APIs), the customer's existing link profile, and a prospect list uploaded by the team.
+
+### Decisions per prospect
+
+| Decision | Options | Signals |
+|---|---|---|
+| Verdict | Pursue, skip, toxic | Topical relevance, site quality, link placement type, sponsored or UGC patterns, spam signals |
+| Prospect type | Editorial, resource page, guest post, directory, unlinked mention, broken link, competitor-linked | Page structure and link context |
+| Pitch angle | Data study, expert quote, resource suggestion, correction, partnership | Site's recent content and what competitors got linked for |
+| Likelihood | Low, medium, high chance of a reply | Outcome history of similar prospects in the ledger |
+| Priority | Score 1 to 100 | Relevance × authority × likelihood |
+
+**Workflow.** Prospects flow into a queue ordered by priority. Each shows the verdict, the reason, the suggested angle and a contact if found. Team members claim prospects, log outreach status (contacted, replied, won, lost) and the outcome feeds the likelihood model.
+
+**Toxic detection.** Separate from skip: sites with link-selling patterns, PBN footprints or spam content are flagged so they are never contacted and, if already linking, surfaced for a disavow review.
+
+**Pricing basis.** Per seat per month, with prospect volume caps by tier.
+
+### Acceptance criteria
+
+- [ ] Import from Ahrefs and Semrush exports, dedupe against existing links
+- [ ] Every prospect receives verdict, type, angle, likelihood and priority
+- [ ] Toxic flag agrees with a manual review ≥ 90% on a 200-site benchmark
+- [ ] Outreach status tracking per seat, with won links verified by crawl
+- [ ] Likelihood recalibrates monthly from logged outcomes
+
+## 11. Module 7: Local SEO Autopilot
+
+For every location in a multi-location business, the autopilot decides each week what needs attention across reviews, Google Business Profile posts, Q&A, categories, photos and citations, and routes the action to the right person or executes it with approval.
+
+**Inputs.** Google Business Profile API (locations, reviews, Q&A, insights, posts), Apple Business Connect, Bing Places, citation data (Yext or BrightLocal export), and Search Console filtered by location pages.
+
+### Decisions per location per week
+
+| Area | Decision | Options |
+|---|---|---|
+| Reviews | What to do with each new review | Reply with template, reply custom, escalate to manager, flag for removal request |
+| Posts | Whether to post and what type | Offer, event, update, none this week |
+| Q&A | Answer, flag, or ignore each question | Answer from knowledge base, escalate, mark spam |
+| Profile health | Which fields need a fix | Categories, hours, attributes, description, photos, duplicate listing |
+| Citations | Which inconsistencies to fix first | NAP mismatch by directory, ranked by impact |
+| Priority | Location health score 0 to 100 | Drives the weekly attention list |
+
+**Execution.** Replies and posts are drafted and queued; the brand sets per-location approval rules (auto-publish templated 5-star replies, always review 1 to 2-star replies). Everything executed is logged against the location.
+
+**Reporting.** Per-location and roll-up: health score trend, review velocity and rating, local pack visibility for tracked terms, and actions taken versus outcomes 30 days later.
+
+**Pricing basis.** Per location per month, with volume breaks at 25, 100 and 250 locations.
+
+### Acceptance criteria
+
+- [ ] GBP OAuth for multi-location accounts, locations synced in under 10 minutes
+- [ ] Weekly attention list per location with prioritised actions
+- [ ] Review replies drafted within 1 hour of a new review, approval rules respected
+- [ ] Citation inconsistencies listed by directory with a fix path
+- [ ] Outcome loop: actions linked to rating, review volume and local visibility changes
+
+## 12. Cross-cutting requirements
+
+These apply to every module and are built once in the platform layer.
+
+### Decision engine contract
+
+- Every decision is a typed request: a state object, a closed set of options and a question. No free-text prompts in production paths.
+- Every response carries option, calibrated probability, top reasons and the model and version used.
+- Provider abstraction: TypeSafe Jev as the primary decision model, OpenAI Decisions API as fallback, with an open-source decision model for on-premise or cost-sensitive batches. Switching providers must not change the request format.
+- Shadow mode: a new model or threshold runs alongside the live one for 2 weeks before it can take over.
+
+### Confidence and human review
+
+- Thresholds per decision type and per account, defaulting to 0.85 auto, 0.60 review, below that uncertain.
+- Irreversible actions (prune, redirect, delete listing, publish reply) always require approval until the account has 90 days of outcome data and the customer opts in.
+- Every override is captured as a labelled example with the human's chosen option and optional reason.
+
+### Outcome ledger
+
+- One table for all modules: decision id, module, account, item, option chosen, confidence, model version, executed date, outcome window, outcome label, metric deltas.
+- Calibration report per model, per module and per vertical, recomputed weekly: stated confidence versus observed accuracy in 10 buckets.
+- Ledger data is anonymised at the aggregate level for cross-account calibration; raw item data never leaves the account.
+
+### Integrations (priority order)
+
+1. Google Search Console, GA4, Google Business Profile (OAuth)
+2. CSV import and export everywhere
+3. Ahrefs and Semrush exports; API where plans allow
+4. WordPress, Webflow, Shopify (read and webhook)
+5. Asana, Trello, Notion, Google Docs, Slack (work queue and alerts)
+6. Public REST API and webhooks for all verdicts
+
+**Reporting.** Monthly client-ready report per site or brand: decisions made, actions completed, outcomes measured, traffic and visibility change, with the agency's logo on agency plans.
+
+**Security and privacy.** UK and EU data residency, encryption at rest and in transit, Google API scopes limited to read-only except where execution is enabled, OAuth tokens revocable in-app, GDPR data processing agreement available, data deletion within 30 days of cancellation.
+
+### Performance and scale
+
+- First verdicts within 20 minutes of connecting a site up to 100k URLs
+- Weekly re-scoring of 100k URLs in under 1 hour
+- 99.5% monthly uptime target for the app; batch jobs retried with exponential backoff
+- Model cost per 10k decisions under £1 at launch
+
+**Accessibility and platform.** Web app responsive to tablet; WCAG 2.1 AA for core flows; English only at launch.
+
+## 13. Pricing and packaging
+
+Pricing is per module, with the Content Decision Engine as the entry product and bundles for agencies. All prices in GBP, monthly, with 2 months free on annual.
+
+| Module | Unit | Starter | Growth | Scale |
+|---|---|---|---|---|
+| 1. Content Decision Engine | Per site, by URLs | £79 (≤ 5k URLs) | £199 (≤ 50k) | £399 (≤ 250k) |
+| 2. Keyword Intent and Clustering | Per workspace, by keywords a month | £49 (25k) | £99 (100k) | £199 (500k) |
+| 3. Programmatic Quality Gate | Per 10k pages scored | £59 per 10k, £99 minimum | £49 per 10k above 50k | Custom above 500k |
+| 4. AI Search Visibility Tracker | Per brand, by prompts | £99 (100 prompts, 3 engines) | £249 (300 prompts, 5 engines) | £499 (1,000 prompts, 5 engines, 5 competitors) |
+| 5. Content Brief Desk | Per team, by briefs a month | £99 (30 briefs) | £249 (100) | £499 (unlimited) |
+| 6. Link Opportunity Filter | Per seat | £39 per seat (500 prospects) | £69 per seat (2,500) | £99 per seat (unlimited) |
+| 7. Local SEO Autopilot | Per location | £12 (1 to 24) | £9 (25 to 99) | £6 (100+) |
+
+### Bundles
+
+- Agency: Modules 1, 2 and 5 for up to 10 sites at £499 a month, white-label reports, additional sites £29 each.
+- Ecommerce: Modules 1, 3 and 4 for one site at £449 a month.
+- All modules, unlimited: £1,499 a month for agencies with over 25 sites.
+
+**Trial and onboarding.** 14-day free trial on Module 1 with full verdicts on up to 1,000 URLs; no card required. Paid onboarding call (£250, refunded on annual) for agencies.
+
+**Unit economics (Module 1, Growth tier).** Model cost for weekly re-scoring of 50k URLs is under £5 a month; crawl and storage under £8; support allocation about £15. Gross margin above 85% at £199.
+
+## 14. Build milestones
+
+We build the web app first and connect to Google later. Customers export their data from Search Console, GA4 and their crawler and upload the files. Google OAuth comes after the app works, so we are not blocked on Google's verification.
+
+We build one milestone at a time. Each milestone ends in a working demo on real data. The next milestone starts only when the current one meets its exit criteria. A Jev production key is available, so decisions run live from the first milestone.
+
+| # | Milestone | Exit criteria |
+|---|---|---|
+| A1 | Upload and data | Uploading a site's Search Console, GA4 and crawl exports shows every URL with its joined metrics |
+| A2 | Verdicts | Every URL has a verdict, reason, confidence and impact range from live Jev decisions |
+| A3 | Work queue | Approved verdicts become tasks and export as CSV and a redirect file |
+| A4 | Outcomes and report | A later upload labels completed tasks worked, neutral or backfired, and a monthly report prints as PDF |
+| A5 | Accounts and launch | Sign-in, billing and hosting are live and the first customer pays |
+| A6 | Prove the loop | 30 paying accounts and a calibration error at or below 0.10 |
+| A7 | Google connections | Search Console and GA4 OAuth replace uploads once Google approves the app |
+| M6 to M8 | Modules 3, 2, then 5 | Each module's acceptance criteria pass |
+| M9+ | Modules 4, 6 and 7 | One module per milestone, ordered by customer demand |
+
+### A1. Upload and data
+
+- Next.js app with a local database and a background job runner.
+- Sites, each with a list of uploads.
+- Search Console upload: the Performance export zip from the Search Console website, or a page and query CSV from Looker Studio, BigQuery or Search Analytics for Sheets. The website export stops at 1,000 rows per table, so larger sites need one of the others.
+- A Search Console export with "Compare" turned on gives the previous period, which the decay signals need.
+- GA4 upload: the landing page report as CSV.
+- Crawl: a built-in sitemap crawler, or a Screaming Frog or Sitebulb CSV.
+- Optional backlinks CSV from Ahrefs or Semrush.
+- All data joined by normalised URL into one table per site.
+- **Exit:** a real site's exports upload in under five minutes and every URL shows clicks, impressions, position, sessions and crawl facts.
+
+### A2. Verdicts
+
+- Hard rules first: protected page types, pages with conversions above threshold and pages under 30 days old are never pruned.
+- Metrics computed in code and passed to Jev as named buckets.
+- Six-verdict decision per URL from Jev, with reasons and calibrated confidence. A mock stand-in runs when no key is set.
+- Cannibalisation on URL pairs sharing three or more top-20 queries. This needs page and query data.
+- Confidence router: auto at 0.85 or above, review from 0.60, uncertain below that with the two most likely verdicts.
+- Expected 90-day click change as a range from the site's own CTR curve.
+- Review screen filtering by verdict, confidence, template and traffic.
+- **Exit:** every URL on three real sites has a verdict, and an SEO reviewer agrees with at least 75% of verdicts at 0.8 or above.
+
+### A3. Work queue
+
+- Approve, change or reject each verdict. Every override is saved as a labelled example.
+- Prune and Redirect always need explicit approval.
+- Tasks with owner, due date, status and a brief per verdict type.
+- Export to CSV and redirect files for common platforms.
+- **Exit:** a reviewer takes a site from verdicts to an exported task list and redirect file inside the app.
+
+### A4. Outcomes and report
+
+- Marking a task done records the date.
+- A later Search Console upload covering 30, 60 or 90 days after that date is compared with the forecast, and the task is labelled worked, neutral or backfired.
+- Monthly report per site that prints to PDF.
+- **Exit:** every Module 1 acceptance criterion in section 5 passes, except the OAuth connection, which uploads replace until A7.
+
+### A5. Accounts and launch
+
+- Sign-in and one account per agency or company, with several sites each.
+- Billing in GBP and the 14-day trial on up to 1,000 URLs.
+- Hosting in a UK or EU region, with Postgres in place of the local database.
+- **Exit:** the first customer pays.
+
+### A6. Prove the loop
+
+- Crawler capacity raised to 100,000 URLs and weekly re-scoring under one hour.
+- Weekly calibration report: stated confidence versus observed accuracy in 10 buckets.
+- Shadow mode for new models and thresholds, and OpenAI Decisions as the fallback provider.
+- Asana, Trello and Notion exports. Agency white-label reports.
+- **Exit:** 30 paying accounts and a calibration error at or below 0.10.
+
+### A7. Google connections
+
+- Search Console and GA4 OAuth with read-only scopes, started as soon as A1 works so verification runs in parallel.
+- Scheduled syncs replace manual uploads. Uploads stay available.
+- **Exit:** Google approves the app and a customer connects without uploading.
+
+### M6 to M8. Next modules
+
+- **M6, Module 3.** Built first because it reuses the crawler and verdict pattern and no incumbent is strong.
+- **M7, Module 2.** Feeds page mapping in Module 1 and brief candidates in Module 5.
+- **M8, Module 5.** Uses Modules 1 and 2 as inputs, so it comes after both.
+- **Exit for each:** its acceptance criteria pass and it has paying accounts. Together they target £15k MRR by month 12.
+
+### M9 and later. Modules 4, 6 and 7
+
+One module per milestone, in the order customer demand sets.
+
+## 15. Risks, dependencies and open questions
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Jev access or pricing changes, or TypeSafe is acquired or loses to OpenAI | Medium | High | Provider abstraction from day one; OpenAI Decisions as live fallback; open-source decision model benchmarked quarterly |
+| Decision accuracy below 80% on real sites at launch | Medium | High | Rules for hard constraints, human review tiers, shadow mode, 200-site private beta before public launch |
+| Google API quota limits (Search Console 16-month window, GBP rate limits) | Medium | Medium | Incremental sync, caching, per-account quotas, Ahrefs or Semrush as supplementary data |
+| AI Overviews tracking breaks when Google changes its interface | High | Medium | Headless browser layer isolated and versioned; alerting on parse failures; degrade to 4 engines rather than fail |
+| Customers distrust automated prune and redirect verdicts | High | Medium | Approval required for irreversible actions; show reasons and evidence; publish calibration reports |
+| Incumbents (Semrush, Ahrefs, Profound) add verdict features | Medium | Medium | Win on the closed loop and outcome data; move fast on Modules 3 and 4 where no incumbent is strong |
+| Solo founder bandwidth across seven modules | High | High | Ship Module 1 only until 30 paying accounts; contract help for crawling and integrations; hire first UK engineer by month 9 |
+| Cost blow-up on Module 4 at scale (225k answers a month per brand) | Medium | Medium | Decision model for all parsing; caps per tier; 3-run averaging only on paid plans |
+
+### Dependencies
+
+- TypeSafe Jev API key with production access, and OpenAI Decisions API access
+- Google Cloud project with Search Console, Analytics Data and Business Profile APIs approved for OAuth verification
+- Crawl infrastructure (own crawler or a hosted crawling API) with 100k URL capacity
+- Payment and subscription provider with GBP and EUR support
+- UK company formation, bank account and data processing agreement template
+
+### Open questions
+
+- [ ] Does Jev's calibration hold on SEO decisions, or do we need our own calibration layer from day one? Resolve in a 2-week benchmark on 20 real sites.
+- [ ] Should Module 1 launch with the built-in crawler or require a Screaming Frog export? Trade-off: time to build versus friction.
+- [ ] Is the first vertical ecommerce, SaaS or agencies? Decide from the first 10 trial conversations.
+- [ ] What minimum outcome data (accounts × months) is needed before cross-account calibration is defensible?
+- [ ] Which endorsing body best fits a UK SaaS with a solo founder, and what traction do they expect at endorsement?
+- [ ] Product name and domain.
