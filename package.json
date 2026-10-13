@@ -1,0 +1,14 @@
+{
+  "name": "jev-content-engine",
+  "private": true,
+  "workspaces": [
+    "engine",
+    "app"
+  ],
+  "scripts": {
+    "build:engine": "npm run build --workspace engine",
+    "dev": "npm run build:engine && npm run dev --workspace app",
+    "build": "npm run build:engine && npm run build --workspace app",
+    "test": "npm test --workspace engine"
+  }
+}

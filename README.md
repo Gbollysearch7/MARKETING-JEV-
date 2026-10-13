@@ -15,16 +15,18 @@ This document does four things:
 
 ## Code
 
-The first 30-day step from section 6 is implemented in [`engine/`](engine/): a TypeScript package with the decision client (pinned model, retries, mock mode), the four versioned question batteries, the rules that turn atomic answers and numeric buckets into verdicts, the linking and cannibalisation module, the publish gate, the financial-promotions compliance gate, the decision log (JSONL and Supabase) and three CLIs. It runs fully offline with a deterministic mock, so you can develop and test before your TypeSafe key arrives.
+Two packages in an npm workspace:
+
+- [`engine/`](engine/): the decision engine. Decision client (pinned model, retries, mock mode), the four versioned question batteries, rules in code, linking and cannibalisation, publish gate, compliance gate, decision log, CLIs, 41 tests.
+- [`app/`](app/): the working product. Next.js 16, file-backed storage, server actions, background runs with live progress. Add a site, run it, accept links, export CSV, read the decision log.
 
 ```bash
-cd engine && npm install && npm test
-npm run linking -- --dir test/fixtures --mock --top-k 3
-npm run publish-gate -- --dir test/fixtures --mock
-npm run compliance -- --file test/fixtures/ad-bad.txt --mock
+npm install
+npm run dev        # http://localhost:3000, mock decisions until TYPESAFE_API_KEY is set in app/.env.local
+npm test           # engine tests
 ```
 
-See [`engine/README.md`](engine/README.md) for the layout and the live-run commands.
+See [`engine/README.md`](engine/README.md) and [`app/README.md`](app/README.md).
 
 ---
 
