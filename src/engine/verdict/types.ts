@@ -45,6 +45,8 @@ export interface Thresholds {
   protectConversions: number;
   protectNewerThanDays: number;
   cannibalSharedQueries: number;
+  /** Below this many impressions a month with no clicks, a page has no search demand to refresh or expand into. */
+  minMonthlyImpressionsForDemand: number;
 }
 
 export const DEFAULT_THRESHOLDS: Thresholds = {
@@ -53,6 +55,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   protectConversions: 1,
   protectNewerThanDays: 30,
   cannibalSharedQueries: 3,
+  minMonthlyImpressionsForDemand: 30,
 };
 
 export interface CannibalPair {

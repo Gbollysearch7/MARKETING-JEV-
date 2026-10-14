@@ -16,9 +16,10 @@ export function VerdictBadge({ v, size = 'md' }: { v: Verdict | null; size?: 'sm
   if (!v) return <span className="text-faint">—</span>;
   return (
     <span
-      className={`inline-flex items-center rounded-md font-medium ${size === 'sm' ? 'px-1.5 py-0.5 text-[11.5px]' : 'px-2 py-0.5 text-[12.5px]'}`}
+      className={`inline-flex items-center gap-1.5 rounded-full font-medium ${size === 'sm' ? 'px-2 py-0.5 text-[11.5px]' : 'px-2.5 py-0.5 text-[12.5px]'}`}
       style={{ color: `var(--${v})`, background: `var(--${v}-bg)` }}
     >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: `var(--${v}-mark)` }} />
       {VERDICT_LABEL[v]}
     </span>
   );
@@ -28,14 +29,14 @@ export const ROUTER_LABEL: Record<Router, string> = { auto: 'Auto', review: 'Nee
 
 export function RouterBadge({ r }: { r: Router | null }) {
   if (!r) return null;
-  const cls = r === 'auto' ? 'bg-ok-bg text-ok' : r === 'review' ? 'bg-warn-bg text-warn' : 'bg-sunken text-muted border border-dashed border-line-strong';
+  const cls = r === 'auto' ? 'bg-ok-bg text-ok' : r === 'review' ? 'bg-warn-bg text-warn' : 'bg-sunken text-ink-2 border border-dashed border-[var(--line-input)]';
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-[11.5px] font-medium ${cls}`}>{ROUTER_LABEL[r]}</span>;
 }
 
 export function StatusBadge({ s }: { s: string }) {
   const map: Record<string, string> = {
-    proposed: 'bg-sunken text-muted', approved: 'bg-ok-bg text-ok', rejected: 'bg-bad-bg text-bad',
-    todo: 'bg-sunken text-muted', in_progress: 'bg-warn-bg text-warn', done: 'bg-ok-bg text-ok', cancelled: 'bg-sunken text-faint',
+    proposed: 'bg-sunken text-ink-2', approved: 'bg-ok-bg text-ok', rejected: 'bg-bad-bg text-bad',
+    todo: 'bg-sunken text-ink-2', in_progress: 'bg-warn-bg text-warn', done: 'bg-ok-bg text-ok', cancelled: 'bg-sunken text-muted',
     worked: 'bg-ok-bg text-ok', neutral: 'bg-sunken text-muted', backfired: 'bg-bad-bg text-bad',
     running: 'bg-warn-bg text-warn', failed: 'bg-bad-bg text-bad',
   };
@@ -74,8 +75,8 @@ export function PageTitle({ title, sub, actions }: { title: ReactNode; sub?: Rea
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em]">{title}</h1>
-        {sub && <p className="mt-1 max-w-3xl text-muted">{sub}</p>}
+        <h1 className="display text-[40px] leading-[1.05]">{title}</h1>
+        {sub && <p className="mt-2 max-w-3xl text-[15px] text-muted">{sub}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -84,26 +85,27 @@ export function PageTitle({ title, sub, actions }: { title: ReactNode; sub?: Rea
 
 export function Section({ title, sub, children, actions, className = '' }: { title?: ReactNode; sub?: ReactNode; children: ReactNode; actions?: ReactNode; className?: string }) {
   return (
-    <section className={`card ${className}`}>
+    <section className={`card overflow-hidden ${className}`}>
       {(title || actions) && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 sm:px-6">
           <div>
-            {title && <h2 className="font-semibold">{title}</h2>}
+            {title && <h2 className="text-[15px] font-semibold">{title}</h2>}
             {sub && <p className="text-[13px] text-muted">{sub}</p>}
           </div>
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
       )}
-      {children}
+      {/* Wide tables scroll inside the card instead of breaking the page on small screens. */}
+      <div className="overflow-x-auto">{children}</div>
     </section>
   );
 }
 
 export function Stat({ label, value, sub, href }: { label: string; value: ReactNode; sub?: ReactNode; href?: string }) {
   const body = (
-    <div className="card h-full px-4 py-3.5 transition-colors hover:border-line-strong">
+    <div className="card h-full px-5 py-4 transition-shadow hover:shadow-[var(--shadow-lg)]">
       <div className="label">{label}</div>
-      <div className="num mt-1 text-[22px] font-semibold tracking-tight">{value}</div>
+      <div className="num display mt-1 text-[34px] leading-none">{value}</div>
       {sub && <div className="mt-0.5 text-[12.5px] text-muted">{sub}</div>}
     </div>
   );
@@ -112,8 +114,8 @@ export function Stat({ label, value, sub, href }: { label: string; value: ReactN
 
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="px-6 py-14 text-center">
-      <p className="font-medium">{title}</p>
+    <div className="px-6 py-16 text-center">
+      <p className="display text-[26px] leading-tight">{title}</p>
       {children && <div className="mx-auto mt-1.5 max-w-md text-muted">{children}</div>}
     </div>
   );
@@ -126,8 +128,8 @@ export function Pager({ total, page, size, href }: { total: number; page: number
     <div className="flex items-center justify-between border-t border-line px-4 py-3 text-[13px] text-muted">
       <span className="num">{fmt((page - 1) * size + 1)}–{fmt(Math.min(total, page * size))} of {fmt(total)}</span>
       <div className="flex gap-2">
-        {page > 1 ? <Link className="btn btn-sm" href={href(page - 1)}>Previous</Link> : <span className="btn btn-sm opacity-40">Previous</span>}
-        {page < pages ? <Link className="btn btn-sm" href={href(page + 1)}>Next</Link> : <span className="btn btn-sm opacity-40">Next</span>}
+        {page > 1 ? <Link className="btn btn-sm" href={href(page - 1)}>Previous</Link> : <span className="btn btn-sm" aria-disabled="true">Previous</span>}
+        {page < pages ? <Link className="btn btn-sm" href={href(page + 1)}>Next</Link> : <span className="btn btn-sm" aria-disabled="true">Next</span>}
       </div>
     </div>
   );

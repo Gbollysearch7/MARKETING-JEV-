@@ -1,12 +1,12 @@
 import { ingestFile, type Slot } from '@/lib/ingest';
-import { getSite } from '@/lib/repo';
+import { siteForRequest } from '@/lib/auth';
 
 const SLOTS: Slot[] = ['gsc', 'ga4', 'crawl', 'backlinks'];
 const MAX_BYTES = 200 * 1024 * 1024;
 
 export async function POST(request: Request, ctx: RouteContext<'/api/sites/[id]/upload'>) {
   const { id } = await ctx.params;
-  if (!getSite(id)) return Response.json({ error: 'Site not found' }, { status: 404 });
+  if (!(await siteForRequest(id))) return Response.json({ error: 'Site not found' }, { status: 404 });
   const form = await request.formData();
   const slot = String(form.get('slot')) as Slot;
   if (!SLOTS.includes(slot)) return Response.json({ error: 'Unknown upload type' }, { status: 400 });

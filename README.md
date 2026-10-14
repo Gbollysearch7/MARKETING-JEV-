@@ -493,6 +493,17 @@ We build one milestone at a time. Each milestone ends in a working demo on real 
 
 One module per milestone, in the order customer demand sets.
 
+### Status, 13 October 2026
+
+First working versions of Modules 2 to 7 are in the app. Each one takes uploads or pasted data, asks Jev typed questions, logs every decision and has sample data. Their acceptance criteria have not been measured on real sites yet. Not built yet:
+
+- **Module 3:** WordPress and Webflow webhooks, which need API keys for each account.
+- **Module 2:** SERP-shape checks and embeddings, which need a SERP API.
+- **Module 4:** live engine runs are switched off until `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY` or `GEMINI_API_KEY` is set. They have not been tested against those providers. AI Overviews capture and daily scheduling are not built.
+- **Module 5:** Google Docs and Notion export, which need OAuth.
+- **Module 6:** contact finding and sending email.
+- **Module 7:** Google Business Profile sync and publishing, which need Google approval, and local-pack rank tracking.
+
 ## 15. Risks, dependencies and open questions
 
 | Risk | Likelihood | Impact | Mitigation |

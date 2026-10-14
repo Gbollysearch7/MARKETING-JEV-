@@ -32,7 +32,13 @@ export function applyRules(u: UrlData, s: Signals, t: Thresholds, hasCandidates:
     if (allowed.length < before) applied.push(why);
   };
   if (s.conversions != null && s.conversions >= t.protectConversions) drop(['prune', 'redirect'], `Has conversions (${s.conversions}): never pruned or redirected`);
-  if (s.ageDays != null && s.ageDays < t.protectNewerThanDays) drop(['prune'], `Updated ${s.ageDays} days ago: never pruned before ${t.protectNewerThanDays} days`);
+  const isNew = s.ageDays != null && s.ageDays < t.protectNewerThanDays;
+  if (isNew) drop(['prune', 'redirect'], `Updated ${s.ageDays} days ago: never pruned or redirected before ${t.protectNewerThanDays} days`);
+  // Refresh and Expand win back or grow search demand. A page with none has nothing to refresh or expand into.
+  // New pages are exempt: they have not had time to earn impressions yet.
+  if (!isNew && s.monthlyClicks < 1 && s.monthlyImpressions < t.minMonthlyImpressionsForDemand && s.highVolumeQueries8to20 === 0) {
+    drop(['refresh', 'expand'], `No search demand (no clicks, under ${t.minMonthlyImpressionsForDemand} impressions a month): Refresh and Expand not available`);
+  }
   if (!s.competing.length) drop(['merge'], 'No competing page shares 3 or more top-20 queries: Merge not available');
   if (!hasCandidates) drop(['redirect'], 'No candidate destination page: Redirect not available');
   return { skip: null, locked: null, allowed, applied };

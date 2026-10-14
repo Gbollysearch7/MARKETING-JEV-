@@ -1,15 +1,22 @@
+import { requireSite } from '@/lib/auth';
 import Link from 'next/link';
 import { VERDICTS, type Verdict } from '@/engine/verdict/types';
 import { JobProgress } from '@/components/JobProgress';
+import { SubmitButton } from '@/components/SubmitButton';
+import { ClicksTrend, VerdictMixTrend } from '@/components/Trends';
+import { DeleteSiteForm } from '@/components/SiteForms';
+import { Onboarding } from '@/components/Onboarding';
+import { db } from '@/lib/db';
 import { Empty, fmt, fmtDateTime, Impact, StatusBadge, VERDICT_LABEL } from '@/components/ui';
-import { deleteSiteAction, runVerdictsAction } from '@/lib/actions';
-import { latestUploads, latestVerdictJob, listJobs, listVerdicts, outcomesForSite, runningJob, verdictSummary } from '@/lib/repo';
+import { runVerdictsAction } from '@/lib/actions';
+import { clicksHistory, latestUploads, latestVerdictJob, listJobs, listVerdicts, outcomesForSite, runHistory, runningJob, verdictSummary } from '@/lib/repo';
 
 const USD_PER_M_INPUT = 0.042;
-const BAR = (v: Verdict) => (v === 'leave' ? 'var(--line-strong)' : `var(--${v})`);
+const BAR = (v: Verdict) => `var(--${v}-mark)`;
 
 export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
   const { id } = await params;
+  const { site } = await requireSite(id);
   const uploads = latestUploads(id);
   const running = runningJob(id);
   const job = latestVerdictJob(id);
@@ -18,6 +25,10 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
   const history = listJobs(id, 'verdicts', 6);
   const hasData = Boolean(uploads.gsc_pages || uploads.gsc_queries || uploads.crawl);
   const inbox = `/sites/${id}/inbox`;
+  const runs = runHistory(id);
+  const reviewed = Boolean(db().prepare(`select 1 from verdicts where site_id = ? and reviewed_by = 'user' limit 1`).get(id));
+  const taskDone = Boolean(db().prepare(`select 1 from tasks where site_id = ? and status = 'done' limit 1`).get(id));
+  const periods = clicksHistory(id);
 
   const total = sum?.byVerdict.reduce((s, x) => s + x.n, 0) ?? 0;
   const count = (v: Verdict) => sum?.byVerdict.find((x) => x.v === v);
@@ -38,7 +49,7 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
           <div className="text-[13px] text-muted">
             {job ? <>Scored {fmtDateTime(job.finished_at)} · {fmt(total)} URLs{sum?.skipped ? ` · ${fmt(sum.skipped)} not scored` : ''} · {job.provider === 'mock' ? 'mock decisions' : job.model}</> : 'Not scored yet'}
           </div>
-          <h1 className="text-balance text-[34px] font-bold leading-[1.1] tracking-[-0.025em]">
+          <h1 className="display text-balance text-[48px] leading-[1.02]">
             {!job ? (hasData ? 'Ready to score every URL.' : 'Start by adding your data.') : pending ? `${fmt(pending)} decision${pending === 1 ? ' is' : 's are'} waiting for you.` : 'Every decision is reviewed.'}
           </h1>
         </div>
@@ -46,13 +57,14 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
           <Link href={`/sites/${id}/data`} className="btn h-11">{hasData ? 'Update data' : 'Add data'}</Link>
           <form action={runVerdictsAction}>
             <input type="hidden" name="siteId" value={id} />
-            <button className={`btn h-11 ${job ? '' : 'btn-primary'}`} disabled={!hasData || Boolean(running)}>{job ? 'Score again' : 'Score every URL'}</button>
+            <SubmitButton className={`btn h-11 ${job ? '' : 'btn-primary'}`} pending="Starting…" disabled={!hasData || Boolean(running)}>{job ? 'Score again' : 'Score every URL'}</SubmitButton>
           </form>
           {job && pending > 0 && <Link href={inbox} className="btn btn-primary h-11">Open the inbox →</Link>}
         </div>
       </header>
 
-      {running && <JobProgress jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling the sitemap' : 'Scoring every URL'} />}
+      <Onboarding siteId={id} hasData={hasData} scored={Boolean(job)} reviewed={reviewed} taskDone={taskDone} />
+      {running && <JobProgress key={running.id} jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling the sitemap' : 'Scoring every URL'} />}
       {hasData && missing.length > 0 && (
         <div className="rounded-xl bg-sunken px-4 py-3 text-[13px] text-ink-2">Verdicts get sharper with {missing.join(', ')}. <Link className="font-semibold text-accent" href={`/sites/${id}/data`}>Add them</Link></div>
       )}
@@ -69,13 +81,13 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
             <div role="img" aria-label={VERDICTS.map((v) => `${count(v)?.n ?? 0} ${v}`).join(', ')} className="flex h-10 gap-[3px] overflow-hidden rounded-[10px]">
               {VERDICTS.map((v) => (count(v)?.n ? <div key={v} style={{ flex: count(v)!.n, background: BAR(v) }} /> : null))}
             </div>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(150px,100%),1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(130px,100%),1fr))] gap-3">
               {VERDICTS.map((v) => {
                 const c = count(v);
                 return (
                   <Link key={v} href={`${inbox}?show=all&verdict=${v}`} className="flex flex-col gap-1 rounded-xl border border-line p-3.5 hover:border-line-strong">
                     <span className="flex items-center gap-2 text-[13px] font-semibold" style={{ color: `var(--${v})` }}><span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: BAR(v) }} />{VERDICT_LABEL[v]}</span>
-                    <span className="num text-[28px] font-bold tracking-[-0.02em]">{fmt(c?.n ?? 0)}</span>
+                    <span className="num display text-[40px] leading-[1.05]">{fmt(c?.n ?? 0)}</span>
                     <span className="mono text-[12px] text-muted">{v === 'leave' ? 'no action needed' : v === 'prune' ? 'removes dead weight' : c ? <Impact low={c.lo} high={c.hi} /> : '—'}</span>
                   </Link>
                 );
@@ -86,8 +98,8 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] gap-5">
             <section aria-label="Confidence" className="card flex flex-col gap-4 p-6">
               <div><h2 className="text-[16px] font-semibold">How sure we are</h2><p className="text-[13px] text-muted">Only confident calls skip you. Prune and Redirect always wait for your approval.</p></div>
-              {([['auto', 'Auto-approved', 'var(--accent)'], ['review', 'Needs review', '#9a6700'], ['uncertain', 'Uncertain', 'repeating-linear-gradient(135deg,#8a93a3 0 4px,#c4cad4 4px 8px)']] as const).map(([r, l, bg]) => (
-                <Link key={r} href={r === 'auto' ? `${inbox}?show=all` : `${inbox}?show=${r}`} className="grid grid-cols-[132px_minmax(0,1fr)_40px] items-center gap-3 hover:underline">
+              {([['auto', 'Auto-approved', 'var(--accent)'], ['review', 'Needs review', 'var(--warn)'], ['uncertain', 'Uncertain', 'repeating-linear-gradient(135deg,#8a93a3 0 4px,#c4cad4 4px 8px)']] as const).map(([r, l, bg]) => (
+                <Link key={r} href={`${inbox}?show=${r}`} className="grid grid-cols-[132px_minmax(0,1fr)_40px] items-center gap-3 hover:underline">
                   <span className="font-semibold">{l}</span>
                   <span className="h-2.5 rounded-full bg-sunken"><span className="block h-full rounded-full" style={{ width: `${total ? Math.round((router(r) / total) * 100) : 0}%`, background: bg }} /></span>
                   <span className="num mono text-right">{fmt(router(r))}</span>
@@ -108,17 +120,29 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
             </section>
           </div>
 
-          <section aria-label="Outcomes" className="flex flex-wrap items-center justify-between gap-6 rounded-2xl bg-ink p-7 text-white">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] gap-5">
+            <section aria-label="Organic clicks over time" className="card flex flex-col gap-4 p-6">
+              <div><h2 className="text-[16px] font-semibold">Organic clicks</h2><p className="text-[13px] text-muted">From each Search Console upload, per month.</p></div>
+              {periods.length ? <ClicksTrend periods={periods} /> : <p className="py-6 text-muted">Upload a Search Console export with a date range to start the trend.</p>}
+              {periods.length === 1 && <p className="text-[12.5px] text-muted">Upload next month&apos;s export to extend the line.</p>}
+            </section>
+            <section aria-label="Verdict mix over time" className="card flex flex-col gap-4 p-6">
+              <div><h2 className="text-[16px] font-semibold">Verdict mix by scoring run</h2><p className="text-[13px] text-muted">As fixes land, Prune, Merge and Redirect should shrink and Leave should grow.</p></div>
+              <VerdictMixTrend runs={runs} />
+            </section>
+          </div>
+
+          <section aria-label="Outcomes" className="flex flex-wrap items-center justify-between gap-6 rounded-[20px] bg-inverse p-8 text-[#f4f1ea] shadow-[var(--shadow-lg)]">
             <div className="flex max-w-[520px] flex-col gap-1.5">
-              <h2 className="text-[20px] font-bold tracking-[-0.01em]">Did it work? Every action gets a verdict too.</h2>
-              <p className="text-[#b8c0cc]">Mark a task done. Each later Search Console upload measures it at 30, 60 and 90 days against its forecast.</p>
+              <h2 className="display text-[34px] leading-[1.05]">Did it work? Every action gets a verdict too.</h2>
+              <p className="text-[#cfc9bc]">Mark a task done. Each later Search Console upload measures it at 30, 60 and 90 days against its forecast.</p>
             </div>
             <div className="flex gap-7">
-              <div className="flex flex-col"><span className="num text-[30px] font-bold">{outCount('worked')}</span><span className="text-[12.5px] text-[#8fe3c9]">worked</span></div>
-              <div className="flex flex-col"><span className="num text-[30px] font-bold">{outCount('neutral')}</span><span className="text-[12.5px] text-[#b8c0cc]">neutral</span></div>
-              <div className="flex flex-col"><span className="num text-[30px] font-bold">{outCount('backfired')}</span><span className="text-[12.5px] text-[#ffb4ab]">backfired</span></div>
+              <div className="flex flex-col"><span className="num display text-[44px] leading-none">{outCount('worked')}</span><span className="text-[12.5px] text-[#b9e3c6]">worked</span></div>
+              <div className="flex flex-col"><span className="num display text-[44px] leading-none">{outCount('neutral')}</span><span className="text-[12.5px] text-[#cfc9bc]">neutral</span></div>
+              <div className="flex flex-col"><span className="num display text-[44px] leading-none">{outCount('backfired')}</span><span className="text-[12.5px] text-[#ffb4ab]">backfired</span></div>
             </div>
-            <Link href={`/sites/${id}/outcomes`} className="btn h-11 border-white bg-white text-ink hover:bg-[#eef0f3]">Open outcomes</Link>
+            <Link href={`/sites/${id}/outcomes`} className="btn h-11 border-[#f4f1ea] bg-[#f4f1ea] text-ink hover:bg-white">Open outcomes</Link>
           </section>
         </>
       )}
@@ -146,14 +170,7 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
         </section>
       )}
 
-      <details className="text-right">
-        <summary className="cursor-pointer text-[13px] text-muted">Delete this site</summary>
-        <form action={deleteSiteAction} className="mt-2 inline-flex flex-wrap items-center justify-end gap-3">
-          <input type="hidden" name="siteId" value={id} />
-          <span className="text-[13px] text-muted">This removes every upload, verdict, task and outcome for the site.</span>
-          <button className="btn btn-sm text-bad">Delete permanently</button>
-        </form>
-      </details>
+      <DeleteSiteForm siteId={id} name={site.name} />
     </div>
   );
 }

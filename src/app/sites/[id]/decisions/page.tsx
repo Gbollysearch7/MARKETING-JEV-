@@ -1,5 +1,7 @@
+import { requireSite } from '@/lib/auth';
 import Link from 'next/link';
 import { Empty, fmt, fmtDateTime, Pager, PageTitle, qs, Section } from '@/components/ui';
+import { db } from '@/lib/db';
 import { labelsForSite, latestVerdictJob, listDecisions } from '@/lib/repo';
 
 const SIZE = 100;
@@ -13,6 +15,7 @@ function answerText(a: Record<string, unknown>) {
 
 export default async function Decisions({ params, searchParams }: PageProps<'/sites/[id]/decisions'>) {
   const { id } = await params;
+  await requireSite(id);
   const sp = (await searchParams) as Record<string, string | undefined>;
   const job = latestVerdictJob(id);
   const labels = labelsForSite(id, 30);
@@ -23,15 +26,25 @@ export default async function Decisions({ params, searchParams }: PageProps<'/si
   return (
     <div className="space-y-5">
       <PageTitle title="Decision log" sub="Every answer from the latest run, with the model version, the question set version and a hash of the exact state sent. Hard-rule verdicts made no call and do not appear here." />
+      {(() => {
+        const st = db().prepare('select count(*) n, count(distinct path) urls, round(avg(latency_ms)) ms, min(model) model from decisions where job_id = ?').get(job.id) as { n: number; urls: number; ms: number | null; model: string | null };
+        return (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[['Answers logged', fmt(st.n)], ['Pages asked about', fmt(st.urls)], ['Average response', st.ms ? `${fmt(st.ms)} ms` : '—'], ['Model', st.model ?? '—']].map(([l, v]) => (
+              <div key={l} className="card px-5 py-4"><div className="label">{l}</div><div className={`mt-1 leading-none ${l === 'Model' ? 'mono pt-2 text-[15px]' : 'display num text-[34px]'}`}>{v}</div></div>
+            ))}
+          </div>
+        );
+      })()}
       <Section
         title="Answers"
         actions={
           <form className="flex flex-wrap gap-2">
-            <input name="path" defaultValue={sp.path} placeholder="URL contains" className="input w-44" />
-            <select name="question" defaultValue={sp.question ?? ''} className="select">
+            <input name="path" aria-label="Filter decision URLs" defaultValue={sp.path} placeholder="URL contains" className="input w-44" />
+            <select aria-label="Decision question" name="question" defaultValue={sp.question ?? ''} className="select">
               <option value="">All questions</option><option value="verdict">verdict</option><option value="target">target</option><option value="title_matches_queries">title_matches_queries</option><option value="time_sensitive">time_sensitive</option>
             </select>
-            <select name="max" defaultValue={sp.max ?? ''} className="select"><option value="">Any confidence</option><option value="0.6">Confidence 0.6 or less</option><option value="0.3">Confidence 0.3 or less</option></select>
+            <select aria-label="Maximum confidence" name="max" defaultValue={sp.max ?? ''} className="select"><option value="">Any confidence</option><option value="0.6">Confidence 0.6 or less</option><option value="0.3">Confidence 0.3 or less</option></select>
             <button className="btn">Apply</button>
           </form>
         }

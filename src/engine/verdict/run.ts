@@ -154,7 +154,7 @@ export async function runVerdicts(urls: UrlData[], ctx: SiteContext, provider: D
       return { ...base, skipped: null, verdict: rules.locked.verdict, probability: 1, probabilities: { [rules.locked.verdict]: 1 }, router: 'auto', needsApproval: false, lockedBy: rules.locked.reason, reasons: [rules.locked.reason], rulesApplied: rules.applied, impact: { low: 0, high: 0 }, state: null, answers: null, model: 'rules', latencyMs: 0, inputTokens: 0 };
     }
 
-    const state = buildState(u, s, bands, titleByPath);
+    const state = buildState(u, s, bands, titleByPath, candidates);
     const questions = buildQuestions(rules.allowed, candidates, s.topQueries.length > 0, Boolean(u.crawl?.excerpt));
     const res = await provider.decide({ state, questions });
     inputTokens += res.usage?.input_tokens ?? 0;

@@ -9,10 +9,17 @@ import { createJob, getVerdict, saveUpload, setVerdictReview, siteInputs, update
 import { taskFromVerdict } from './tasks';
 
 /** Score every URL on a site. Runs in the background; the UI polls the job row. */
-export function startVerdictJob(siteId: string): Job {
+export function startVerdictJob(siteId: string, urlLimit: number): Job {
   const inputs = siteInputs(siteId);
-  const { urls, ctx, notes } = buildSiteData(inputs);
+  const built = buildSiteData(inputs);
+  const { ctx, notes } = built;
+  let urls = built.urls;
   if (!urls.length) throw new Error('Upload Search Console data or a crawl first.');
+  // The plan covers a number of URLs per site. Score the ones that matter most: most clicks, then most impressions.
+  if (urls.length > urlLimit) {
+    notes.push(`Scored the top ${urlLimit.toLocaleString('en-GB')} of ${urls.length.toLocaleString('en-GB')} URLs by traffic. Upgrade the plan to score them all.`);
+    urls = [...urls].sort((a, b) => (b.gsc?.clicks ?? 0) - (a.gsc?.clicks ?? 0) || (b.gsc?.impressions ?? 0) - (a.gsc?.impressions ?? 0)).slice(0, urlLimit);
+  }
   const provider = getProvider();
   const job = createJob(siteId, 'verdicts', { uploadIds: inputs.uploadIds, notes, urls: urls.length });
   updateJob(job.id, { total: urls.length, provider: provider.name, model: provider.model, message: `Scoring ${urls.length} URLs` });

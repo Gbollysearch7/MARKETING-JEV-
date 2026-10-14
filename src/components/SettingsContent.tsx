@@ -1,5 +1,4 @@
 import { DEFAULT_THRESHOLDS } from '@/engine/verdict/types';
-import { dataDir } from '@/lib/db';
 import { providerInfo } from '@/lib/provider';
 
 export function SettingsContent() {
@@ -7,7 +6,7 @@ export function SettingsContent() {
   const t = DEFAULT_THRESHOLDS;
   return (
     <div className="flex max-w-[920px] flex-col gap-5">
-      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em]">Settings</h1>
+      <h1 className="display text-[40px] leading-[1.05]">Settings</h1>
 
       <section className="card flex flex-col gap-3.5 px-6 py-5">
         <h2 className="font-semibold">Decision model</h2>
@@ -17,24 +16,21 @@ export function SettingsContent() {
             <span className="text-[13px] text-muted">{p.live ? 'Primary · key connected' : 'No key set · using the offline mock'}</span>
             <span className="mono text-[12px]">{p.model} pinned</span>
           </div>
-          <div className="flex flex-col gap-1 rounded-xl border border-line p-3.5"><span className="font-semibold">OpenAI Decisions</span><span className="text-[13px] text-muted">Fallback · milestone A6</span><span className="mono text-[12px] text-muted">not connected</span></div>
-          <div className="flex flex-col gap-1 rounded-xl border border-line p-3.5"><span className="font-semibold">Shadow mode</span><span className="text-[13px] text-muted">A new model runs beside the live one for 2 weeks before it takes over</span></div>
         </div>
         {!p.live && (
           <div className="rounded-xl bg-warn-bg px-4 py-3 text-[13px] text-warn">
-            To use Jev, create a file called <code className="mono">.env.local</code> in the project folder with the line below, then restart the app.
-            <pre className="mono mt-2 rounded-lg bg-surface px-3 py-2 text-[12px] text-ink">TYPESAFE_API_KEY=your-key-here</pre>
+            Live decisions are not configured. Sample recommendations let you explore the workflow. Ask the application administrator to enable the decision service.
           </div>
         )}
-        <div className="mono text-[12px] text-muted">{p.baseUrl}/v1/systemone</div>
+        {process.env.NODE_ENV === 'development' && <details className="text-[12px] text-muted"><summary className="cursor-pointer font-medium">Developer setup</summary><p className="mt-2">Set TYPESAFE_API_KEY in .env.local and restart the development server to enable live decisions.</p><div className="mono mt-2">{p.baseUrl}/v1/systemone</div></details>}
       </section>
 
       <section className="card flex flex-col gap-4 px-6 py-5">
-        <div><h2 className="font-semibold">Confidence routing</h2><p className="text-[13px] text-muted">Where each verdict goes. Per-site tuning unlocks once a site has 90 days of outcomes.</p></div>
+        <div><h2 className="font-semibold">Confidence routing</h2><p className="text-[13px] text-muted">Current defaults for deciding which recommendations need a human review.</p></div>
         <div role="img" aria-label="Uncertain below 0.60, review from 0.60 to 0.84, auto at 0.85 and above" className="flex flex-col gap-2">
           <div className="flex h-3.5 overflow-hidden rounded-full">
             <div style={{ flex: 60, background: 'repeating-linear-gradient(135deg,#8a93a3 0 4px,#c4cad4 4px 8px)' }} />
-            <div style={{ flex: 25, background: '#e0a93b' }} />
+            <div style={{ flex: 25, background: '#d9a441' }} />
             <div style={{ flex: 15, background: 'var(--accent)' }} />
           </div>
           <div className="mono flex text-[12px] text-muted"><span style={{ flex: 60 }}>0</span><span style={{ flex: 25 }}>{t.review.toFixed(2)}</span><span style={{ flex: 15 }}>{t.auto.toFixed(2)}</span><span>1</span></div>
@@ -60,8 +56,8 @@ export function SettingsContent() {
       </section>
 
       <section className="card flex flex-wrap items-center justify-between gap-3 px-6 py-5">
-        <div><h2 className="font-semibold">Team and billing</h2><p className="text-[13px] text-muted">Sign-in, seats and plans arrive in milestone A5. Data is stored locally at <span className="mono">{dataDir()}</span> until then.</p></div>
-        <span className="rounded-full bg-sunken px-3 py-1 text-[12.5px] font-semibold text-ink-2">Coming in A5</span>
+        <div><h2 className="font-semibold">Plan and billing</h2><p className="text-[13px] text-muted">Your current plan, trial and invoices.</p></div>
+        <a href="/billing" className="btn">Open billing</a>
       </section>
     </div>
   );

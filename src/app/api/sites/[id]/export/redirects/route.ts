@@ -1,9 +1,10 @@
 import { REDIRECT_FORMATS, redirectFile, type RedirectFormat } from '@/lib/exports';
-import { getSite, listTasks } from '@/lib/repo';
+import { siteForRequest } from '@/lib/auth';
+import { listTasks } from '@/lib/repo';
 
 export async function GET(req: Request, ctx: RouteContext<'/api/sites/[id]/export/redirects'>) {
   const { id } = await ctx.params;
-  const site = getSite(id);
+  const site = await siteForRequest(id);
   if (!site) return new Response('Not found', { status: 404 });
   const format = (new URL(req.url).searchParams.get('format') ?? 'csv') as RedirectFormat;
   const spec = REDIRECT_FORMATS[format];

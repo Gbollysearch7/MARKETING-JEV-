@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { VERDICTS, type Verdict } from '@/engine/verdict/types';
-import { reviewVerdictAction } from '@/lib/actions';
+import type { Verdict } from '@/engine/verdict/types';
 import type { Task, VerdictRow } from '@/lib/repo';
-import { fmt, Impact, ROUTER_LABEL, StatusBadge, VERDICT_LABEL, VERDICT_MEANING } from './ui';
+import { VerdictReviewControls } from './VerdictReviewControls';
+import { fmt, Impact, ROUTER_LABEL, StatusBadge, VERDICT_LABEL } from './ui';
 
 const BAND_LABEL: Record<string, string> = {
   monthly_clicks: 'Clicks a month', click_trend: 'Click trend', impression_trend: 'Impressions', average_position: 'Average position',
@@ -28,7 +28,6 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
   const probs = (Object.entries(v.probabilities) as [Verdict, number][]).sort((a, b) => b[1] - a[1]);
   const second = probs.find(([k]) => k !== v.verdict)?.[0] ?? 'leave';
   const target = v.final_target ?? v.target;
-  const needsTarget = (v.verdict === 'merge' || v.verdict === 'redirect') && !v.target;
 
   if (v.skipped || !verdict) {
     return (
@@ -41,8 +40,8 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
   }
 
   return (
-    <section aria-label="Evidence" className="card flex flex-col">
-      <div className="flex flex-col gap-3.5 border-b border-line px-7 py-6">
+    <section aria-label="Evidence" className="card enter flex flex-col">
+      <div className="flex flex-col gap-3.5 border-b border-line px-5 py-6 sm:px-7">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="rounded-[7px] px-2.5 py-1 text-[13px] font-bold" style={{ color: `var(--${verdict})`, background: `var(--${verdict}-bg)` }}>{VERDICT_LABEL[verdict]}</span>
           {v.router && <span className={`rounded-full border px-2.5 py-0.5 text-[12px] font-semibold ${routerStyle(v.router)}`}>{v.locked_by ? 'Hard rule' : ROUTER_LABEL[v.router]}</span>}
@@ -54,22 +53,21 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
           <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
             <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--muted)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h10M9 4l4 4-4 4" /></svg>
             <span className="mono">{target}</span>
-            {v.target_probability != null && target === v.target && <span className="text-muted">· {v.target_probability.toFixed(2)}</span>}
+            {v.target_probability != null && target === v.target && <span className="text-muted">· target confidence {Math.round(v.target_probability * 100)}%</span>}
           </div>
         )}
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(150px,100%),1fr))] gap-3 pt-1">
-          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Probability</span><span className="num text-[26px] font-bold tracking-[-0.02em]">{v.probability.toFixed(2)}</span></div>
-          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Clicks a month now</span><span className="num text-[26px] font-bold tracking-[-0.02em]">{fmt(v.monthly_clicks)}</span></div>
-          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Expected change in 90 days</span><span className="text-[26px] font-bold tracking-[-0.02em]"><Impact low={v.impact_low} high={v.impact_high} /></span></div>
+        <div className="grid grid-cols-2 gap-4 pt-1 xl:grid-cols-3">
+          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Confidence in {VERDICT_LABEL[v.verdict!]}</span><span className="num display text-[32px] leading-none">{Math.round(v.probability * 100)}%</span></div>
+          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Clicks a month now</span><span className="num display text-[32px] leading-none">{fmt(v.monthly_clicks)}</span></div>
+          <div className="col-span-2 flex flex-col gap-0.5 xl:col-span-1"><span className="text-[12px] text-muted">Monthly clicks: forecast at 90 days</span><span className="display text-[30px] leading-none"><Impact low={v.impact_low} high={v.impact_high} /></span></div>
         </div>
       </div>
 
-      <div className="flex flex-wrap">
-        <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-5 border-line px-7 py-6 md:border-r">
+      <div className="flex flex-col gap-4 px-5 py-5 sm:px-7">
           <div className="flex flex-col gap-2">
             <h3 className="text-[13px] font-semibold text-muted">Why</h3>
             {v.reasons.map((r) => (
-              <div key={r} className="flex items-start gap-2.5"><span aria-hidden className="mt-[7px] h-1.5 w-1.5 flex-none rounded-full" style={{ background: `var(--${verdict})` }} /><span>{r}</span></div>
+              <div key={r} className="flex items-start gap-2.5"><span aria-hidden className="mt-[7px] h-1.5 w-1.5 flex-none rounded-full" style={{ background: `var(--${verdict}-mark)` }} /><span>{r}</span></div>
             ))}
           </div>
           {v.settle.length > 0 && (
@@ -78,13 +76,30 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
               <ul className="flex list-disc flex-col gap-1 pl-4 text-[13.5px] text-ink-2">{v.settle.map((s) => <li key={s}>{s}</li>)}</ul>
             </div>
           )}
+        <p className="text-[12px] text-muted">Confidence describes the recommended action, not the likelihood of gaining traffic. Forecasts are estimates.</p>
+      </div>
+      {v.status === 'proposed' ? (
+        <VerdictReviewControls key={v.id} id={v.id} verdict={v.verdict!} alternative={second} target={v.target} back={nextBack} uncertain={v.router === 'uncertain'} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 border-y border-line bg-surface-2 px-5 py-4 text-[13px] sm:px-7">
+          <StatusBadge s={v.status} />
+          {v.reviewed_by === 'auto' && <span className="text-muted">Automatically approved</span>}
+          {v.final_verdict && v.final_verdict !== v.verdict && <span className="text-muted">Changed from {VERDICT_LABEL[v.verdict!]}</span>}
+          {task && <Link className="font-semibold text-accent" href={`/sites/${siteId}/queue?t=${task.id}`}>Open the task</Link>}
+          <Link className="ml-auto text-muted underline" href={back}>Back to the list</Link>
+        </div>
+      )}
+      <details className="rounded-b-2xl">
+        <summary className="cursor-pointer px-5 py-4 text-[13px] font-semibold sm:px-7">Supporting evidence and alternative verdicts</summary>
+      <div className="flex flex-wrap">
+        <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-5 border-line px-7 py-6 md:border-r">
           {!v.locked_by && (
             <div className="flex flex-col gap-2.5">
               <h3 className="text-[13px] font-semibold text-muted">Every option the model weighed</h3>
               {probs.map(([k, p]) => (
                 <div key={k} className="grid grid-cols-[76px_minmax(0,1fr)_40px] items-center gap-2.5">
                   <span className="text-[13px] font-semibold" style={{ color: `var(--${k})` }}>{VERDICT_LABEL[k]}</span>
-                  <span className="h-2 rounded-full bg-sunken"><span className="block h-full rounded-full" style={{ width: `${Math.round(p * 100)}%`, background: k === 'leave' ? '#a6aebb' : `var(--${k})` }} /></span>
+                  <span className="h-2 rounded-full bg-sunken"><span className="block h-full rounded-full" style={{ width: `${Math.round(p * 100)}%`, background: `var(--${k}-mark)` }} /></span>
                   <span className="num mono text-right text-[12.5px]">{p.toFixed(2)}</span>
                 </div>
               ))}
@@ -92,7 +107,7 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
           )}
           {nouls.length > 0 && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-[13px] font-semibold text-muted">Atomic answers</h3>
+              <h3 className="text-[13px] font-semibold text-muted">Additional checks</h3>
               {nouls.map((n) => (
                 <div key={n.key} className="flex items-center justify-between gap-3 text-[13px]"><span>{NOUL_LABEL[n.key] ?? n.key}</span><span className="mono">yes {n.p.toFixed(2)}</span></div>
               ))}
@@ -107,8 +122,8 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
         </div>
         {v.bands && (
           <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-2.5 px-7 py-6">
-            <h3 className="text-[13px] font-semibold text-muted">Signals sent to Jev</h3>
-            <p className="text-[12.5px] text-muted">Numbers are turned into named bands in code. The model never does arithmetic.</p>
+            <h3 className="text-[13px] font-semibold text-muted">Page signals</h3>
+            <p className="text-[12.5px] text-muted">The performance and content signals used for this recommendation.</p>
             <div className="flex flex-col">
               {Object.entries(v.bands).map(([k, b]) => (
                 <div key={k} className="flex justify-between gap-3 border-b border-line py-2 text-[13px] last:border-0">
@@ -127,46 +142,8 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
         )}
       </div>
 
-      <div className="mt-auto flex flex-col gap-3 rounded-b-2xl border-t border-line bg-[#fbfbfc] px-7 py-4">
-        {v.status === 'proposed' ? (
-          <>
-            {needsTarget && <p className="text-[13px] text-warn">No confident target. Choose one with Change below.</p>}
-            <form action={reviewVerdictAction} className="flex flex-wrap items-center gap-2.5">
-              <input type="hidden" name="verdictId" value={v.id} />
-              <input type="hidden" name="back" value={nextBack} />
-              <button name="decision" value="approve" className="btn btn-primary h-11" disabled={needsTarget}>Approve {VERDICT_LABEL[v.verdict!]}</button>
-              <button name="decision" value="reject" className="btn h-11 text-bad">Reject</button>
-              <span className="ml-auto mono text-[12px] text-muted">{v.model === 'mock' ? 'offline mock' : v.model} · content-verdict.v1</span>
-            </form>
-            <details className="rounded-xl border border-line bg-surface" open={v.router === 'uncertain' || needsTarget}>
-              <summary className="cursor-pointer px-4 py-2.5 text-[13px] font-semibold">Change the verdict</summary>
-              <form action={reviewVerdictAction} className="grid gap-3 border-t border-line p-4 sm:grid-cols-2">
-                <input type="hidden" name="verdictId" value={v.id} />
-                <input type="hidden" name="back" value={nextBack} />
-                <input type="hidden" name="decision" value="change" />
-                <label className="flex flex-col gap-1 text-[12px] text-muted">Verdict
-                  <select name="verdict" className="select" defaultValue={second}>{VERDICTS.map((x) => <option key={x} value={x}>{VERDICT_LABEL[x]} · {VERDICT_MEANING[x]}</option>)}</select>
-                </label>
-                <label className="flex flex-col gap-1 text-[12px] text-muted">Target path, for Merge and Redirect
-                  <input name="target" className="input mono" defaultValue={v.target ?? ''} placeholder="/guides/best-tent" />
-                </label>
-                <label className="flex flex-col gap-1 text-[12px] text-muted sm:col-span-2">Reason, optional, it teaches the model
-                  <input name="reason" className="input" placeholder="For example: seasonal page, traffic returns every spring" />
-                </label>
-                <div className="sm:col-span-2"><button className="btn btn-dark">Save and approve</button></div>
-              </form>
-            </details>
-          </>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3 text-[13px]">
-            <StatusBadge s={v.status} />
-            {v.reviewed_by === 'auto' && <span className="text-muted">Auto-approved at 0.85 or above</span>}
-            {v.final_verdict && v.final_verdict !== v.verdict && <span className="text-muted">Changed from {VERDICT_LABEL[v.verdict!]}</span>}
-            {task && <Link className="font-semibold text-accent" href={`/sites/${siteId}/queue?t=${task.id}`}>Open the task</Link>}
-            <Link className="ml-auto text-muted underline" href={back}>Back to the list</Link>
-          </div>
-        )}
-      </div>
+      <p className="px-5 pb-4 text-[12px] text-muted sm:px-7">{v.model === 'mock' ? 'Offline sample decisions' : `Decision model: ${v.model}`}</p>
+      </details>
     </section>
   );
 }

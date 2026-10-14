@@ -1,7 +1,8 @@
+import { requireSite } from '@/lib/auth';
 import Link from 'next/link';
 import type { Verdict } from '@/engine/verdict/types';
+import { TaskEditor } from '@/components/TaskEditor';
 import { Empty, fmtDate, Impact, StatusBadge, VERDICT_LABEL } from '@/components/ui';
-import { updateTaskAction } from '@/lib/actions';
 import { REDIRECT_FORMATS, redirectRules } from '@/lib/exports';
 import { listTasks, outcomesForTask, type Task } from '@/lib/repo';
 
@@ -17,12 +18,14 @@ function Badge({ v }: { v: Verdict }) {
 
 export default async function Queue({ params, searchParams }: PageProps<'/sites/[id]/queue'>) {
   const { id } = await params;
+  await requireSite(id);
   const sp = (await searchParams) as Record<string, string | undefined>;
   const all = listTasks(id);
   const cancelled = listTasks(id, { status: 'cancelled' });
   const rules = redirectRules(all);
   const today = new Date().toISOString().slice(0, 10);
-  const selected = all.find((t) => t.id === sp.t) ?? cancelled.find((t) => t.id === sp.t) ?? all.find((t) => t.status !== 'done') ?? all[0] ?? null;
+  const fromUrl = all.find((t) => t.id === sp.t) ?? cancelled.find((t) => t.id === sp.t);
+  const selected = fromUrl ?? all.find((t) => t.status !== 'done') ?? all[0] ?? null;
   const outs = selected ? outcomesForTask(selected.id) : [];
   const base = `/sites/${id}/queue`;
 
@@ -30,7 +33,7 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex max-w-[720px] flex-col gap-1">
-          <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em]">Work queue</h1>
+          <h1 className="display text-[40px] leading-[1.05]">Work queue</h1>
           <p className="text-muted">Approved decisions, each with a brief. Mark one done when the change is live and its outcome starts being measured.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -50,24 +53,27 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
       {all.length === 0 && cancelled.length === 0 ? (
         <section className="card"><Empty title="No tasks yet">Approve decisions in the <Link href={`/sites/${id}/inbox`} className="underline">decision inbox</Link> to fill the queue.</Empty></section>
       ) : (
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="grid min-w-0 flex-[1_1_520px] grid-cols-[repeat(auto-fit,minmax(min(220px,100%),1fr))] gap-3.5">
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
+          <div className={`min-w-0 ${fromUrl ? 'hidden xl:block' : ''}`}>
+            <p className="mb-3 text-[12px] text-muted xl:hidden">Select a task to open its brief. Scroll across to see all three statuses.</p>
+            <div role="region" aria-label="Task board" tabIndex={0} className="overflow-x-auto pb-3">
+            <div className="grid grid-cols-[repeat(3,minmax(220px,1fr))] items-start gap-3.5">
             {COLUMNS.map((c) => {
               const items = all.filter((t) => t.status === c.key);
               return (
-                <section key={c.key} aria-label={c.label} className="flex flex-col gap-2.5">
+                <section key={c.key} aria-label={c.label} className="flex max-h-[65vh] flex-col gap-2.5 overflow-y-auto xl:max-h-[calc(100vh-220px)]">
                   <h2 className="flex justify-between px-1 text-[13px] font-semibold text-ink-2">{c.label}<span className="mono text-muted">{items.length}</span></h2>
                   {items.length === 0 && <div className="rounded-xl border border-dashed border-line-strong px-3.5 py-5 text-center text-[13px] text-muted">{c.empty}</div>}
                   {items.map((t) => {
                     const on = t.id === selected?.id;
                     return (
-                      <Link key={t.id} href={`${base}?t=${t.id}`} scroll={false} aria-current={on ? 'true' : undefined}
+                      <Link key={t.id} href={`${base}?t=${t.id}`} aria-current={on ? 'true' : undefined}
                         className={`flex flex-col gap-2.5 rounded-xl bg-surface p-3.5 ${on ? 'border-2 border-accent' : 'border border-line hover:border-line-strong'}`}>
                         <Badge v={t.verdict} />
                         <span className="mono break-all text-[13px]">{t.path}</span>
                         <span className="flex justify-between gap-2 text-[12.5px] text-muted">
-                          <span>{t.owner || 'Unassigned'}{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ''}</span>
-                          <span className="mono text-ok"><Impact low={t.forecast_low} high={t.forecast_high} /></span>
+                          <span className="min-w-0 break-words">{t.owner || 'Unassigned'}{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ''}</span>
+                          <span className="mono flex-none whitespace-nowrap text-ink-2"><Impact low={t.forecast_low} high={t.forecast_high} /></span>
                         </span>
                       </Link>
                     );
@@ -76,10 +82,13 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
               );
             })}
             {cancelled.length > 0 && <p className="col-span-full text-[12.5px] text-muted">{cancelled.length} cancelled {cancelled.length === 1 ? 'task' : 'tasks'} hidden.</p>}
+            </div>
+            </div>
           </div>
 
           {selected && (
-            <section aria-label="Brief" className="card flex min-w-0 flex-[1_1_380px] flex-col">
+            <section key={selected.id} aria-label="Brief" className={`card min-w-0 flex-col ${fromUrl ? 'flex' : 'hidden xl:flex'}`}>
+              <Link href={base} className="border-b border-line px-5 py-3 font-medium text-accent xl:hidden">← Back to the task board</Link>
               <div className="flex flex-col gap-2.5 border-b border-line px-6 py-5">
                 <div className="flex items-center justify-between gap-2"><Badge v={selected.verdict} /><StatusBadge s={selected.status} /></div>
                 <h2 className="mono break-all text-[18px] font-medium">{selected.path}</h2>
@@ -87,18 +96,7 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
                 <p className="text-ink-2">{selected.brief.summary}</p>
                 <div className="text-[13px] text-muted">Expected <span className="font-medium text-ink"><Impact low={selected.forecast_low} high={selected.forecast_high} /></span> clicks a month in 90 days</div>
               </div>
-              <form action={updateTaskAction} className="grid grid-cols-[repeat(auto-fit,minmax(min(140px,100%),1fr))] items-end gap-3 border-b border-line px-6 py-4">
-                <input type="hidden" name="taskId" value={selected.id} />
-                <label className="flex flex-col gap-1 text-[12px] text-muted">Owner<input name="owner" defaultValue={selected.owner ?? ''} placeholder="Assign someone" className="input" /></label>
-                <label className="flex flex-col gap-1 text-[12px] text-muted">Due<input name="due_date" type="date" defaultValue={selected.due_date ?? ''} className="input" /></label>
-                <label className="flex flex-col gap-1 text-[12px] text-muted">Status
-                  <select name="status" defaultValue={selected.status} className="select">
-                    <option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
-                  </select>
-                </label>
-                {selected.status !== 'done' && <label className="flex flex-col gap-1 text-[12px] text-muted">Done on, if done<input name="done_at" type="date" defaultValue={today} max={today} className="input" /></label>}
-                <button className="btn btn-primary">Save</button>
-              </form>
+              <TaskEditor key={selected.id} task={selected} today={today} />
               <div className="flex flex-col gap-2.5 border-b border-line px-6 py-4">
                 <h3 className="text-[13px] font-semibold text-muted">Checklist</h3>
                 <ol className="flex list-decimal flex-col gap-1.5 pl-5">{selected.brief.checklist.map((c) => <li key={c}>{c}</li>)}</ol>

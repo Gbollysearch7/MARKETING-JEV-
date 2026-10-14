@@ -17,7 +17,7 @@ export interface Upload {
   period_start: string | null; period_end: string | null; row_count: number; notes: string[]; created_at: string;
 }
 export interface Job {
-  id: string; site_id: string; type: 'verdicts' | 'crawl'; status: 'running' | 'done' | 'failed';
+  id: string; site_id: string; type: string; status: 'running' | 'done' | 'failed';
   progress: number; total: number; message: string | null; error: string | null; provider: string | null; model: string | null;
   input_tokens: number; meta: Record<string, unknown>; created_at: string; finished_at: string | null;
 }
@@ -50,20 +50,20 @@ const J = <T,>(s: string | null): T => (s == null ? (null as T) : (JSON.parse(s)
 
 // ---------- sites ----------
 
-export function listSites(): (Site & { url_count: number; last_run: string | null })[] {
+export function listSites(accountId: string): (Site & { url_count: number; last_run: string | null })[] {
   return db().prepare(`
     select s.*, (select count(*) from site_urls u where u.site_id = s.id) as url_count,
       (select max(finished_at) from jobs j where j.site_id = s.id and j.type = 'verdicts' and j.status = 'done') as last_run
-    from sites s order by s.created_at desc`).all() as never;
+    from sites s where s.account_id = ? order by s.created_at desc`).all(accountId) as never;
 }
 
 export function getSite(id: string): Site | null {
   return (db().prepare('select * from sites where id = ?').get(id) as Site | undefined) ?? null;
 }
 
-export function createSite(name: string, domainOrUrl: string, sitemapUrl: string | null): Site {
+export function createSite(accountId: string, name: string, domainOrUrl: string, sitemapUrl: string | null): Site {
   const site: Site = { id: newId(), name, domain: hostOf(domainOrUrl) ?? domainOrUrl, sitemap_url: sitemapUrl, created_at: now() };
-  db().prepare('insert into sites (id, name, domain, sitemap_url, created_at) values (@id, @name, @domain, @sitemap_url, @created_at)').run(site);
+  db().prepare('insert into sites (id, name, domain, sitemap_url, created_at, account_id) values (@id, @name, @domain, @sitemap_url, @created_at, @account_id)').run({ ...site, account_id: accountId });
   return site;
 }
 
@@ -192,8 +192,8 @@ export function listJobs(siteId: string, type?: Job['type'], limit = 10): Job[] 
   return (rows as (Job & { meta: string })[]).map(parseJob);
 }
 
-export function latestVerdictJob(siteId: string): Job | null {
-  const j = db().prepare(`select * from jobs where site_id = ? and type = 'verdicts' and status = 'done' order by finished_at desc limit 1`).get(siteId) as (Job & { meta: string }) | undefined;
+export function latestVerdictJob(siteId: string, before?: string): Job | null {
+  const j = db().prepare(`select * from jobs where site_id = ? and type = 'verdicts' and status = 'done' ${before ? 'and finished_at < ?' : ''} order by finished_at desc limit 1`).get(...(before ? [siteId, before] : [siteId])) as (Job & { meta: string }) | undefined;
   return j ? parseJob(j) : null;
 }
 
@@ -340,4 +340,33 @@ export function saveOutcome(o: Omit<Outcome, 'id' | 'measured_at'>) {
 
 export function gscUploadsWithPeriod(siteId: string): Upload[] {
   return listUploads(siteId).filter((u) => (u.kind === 'gsc_pages' || u.kind === 'gsc_queries') && u.period_start && u.period_end);
+}
+
+// ---------- trends ----------
+
+/** Verdict mix for each completed scoring run, oldest first. */
+export function runHistory(siteId: string, limit = 8): { id: string; at: string; model: string; mix: Partial<Record<Verdict, number>>; total: number }[] {
+  const jobs = db().prepare(`select id, finished_at, provider, model from jobs where site_id = ? and type = 'verdicts' and status = 'done' order by finished_at desc limit ?`).all(siteId, limit) as { id: string; finished_at: string; provider: string; model: string }[];
+  return jobs.reverse().map((j) => {
+    const rows = db().prepare(`select coalesce(final_verdict, verdict) v, count(*) n from verdicts where job_id = ? and skipped is null group by v`).all(j.id) as { v: Verdict; n: number }[];
+    const mix: Partial<Record<Verdict, number>> = {};
+    for (const r of rows) mix[r.v] = r.n;
+    return { id: j.id, at: j.finished_at, model: j.provider === 'mock' ? 'mock' : j.model, mix, total: rows.reduce((s, r) => s + r.n, 0) };
+  });
+}
+
+/** Site-wide organic clicks a month for each Search Console upload with a known period, oldest period first. */
+export function clicksHistory(siteId: string): { start: string; end: string; clicksMonth: number; prevClicksMonth: number | null }[] {
+  const ups = listUploads(siteId).filter((u) => (u.kind === 'gsc_pages' || u.kind === 'gsc_queries') && u.period_start && u.period_end);
+  const byPeriod = new Map<string, { start: string; end: string; clicksMonth: number; prevClicksMonth: number | null }>();
+  for (const u of ups) {
+    const key = `${u.period_start}|${u.period_end}`;
+    if (byPeriod.has(key) && u.kind === 'gsc_queries') continue; // prefer the pages export for totals
+    const g = uploadData<GscImport>(u.id);
+    const days = Math.max(1, Math.round((Date.parse(u.period_end!) - Date.parse(u.period_start!)) / 86_400_000) + 1);
+    const clicks = g.pages.reduce((s, p) => s + p.clicks, 0);
+    const prev = g.hasPrevious ? g.pages.reduce((s, p) => s + (p.prevClicks ?? 0), 0) : null;
+    byPeriod.set(key, { start: u.period_start!, end: u.period_end!, clicksMonth: Math.round(clicks * 30 / days), prevClicksMonth: prev == null ? null : Math.round(prev * 30 / days) });
+  }
+  return [...byPeriod.values()].sort((a, b) => a.start.localeCompare(b.start));
 }

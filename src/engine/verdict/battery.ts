@@ -5,18 +5,18 @@ import type { UrlData, Verdict } from './types';
 export const CRITERIA_VERSION = 'content-verdict.v1';
 
 export const VERDICT_CRITERIA: Record<Verdict, string> = {
-  refresh: 'Keep the URL and update the content. Fits when impressions hold but clicks or position are decaying, the content is over 12 months old, or it contains claims that go out of date.',
+  refresh: 'Keep the URL and update the content. Fits when the page still earns clicks or impressions (`performance.monthly_clicks` is low or higher) and they are decaying, or the content is out of date. Does not fit a page with no traffic.',
   expand: 'Keep the URL and add depth. Fits when the page ranks around positions 8 to 20 for queries with real search volume and the content is thin for the topic.',
   merge: 'Combine this page into a stronger sibling. Fits when another page on the site competes for the same queries (see `overlap`) and this page is clearly the weaker one.',
-  redirect: 'Send a 301 redirect to the best matching page. Fits when the page gets no meaningful traffic but has referring domains or historic equity, and a close topical match exists.',
-  prune: 'Remove the page and return 410. Fits when the page has no traffic, no referring domains and no conversions, is not a legal or navigational page, and is thin or duplicate.',
+  redirect: 'Send a 301 redirect to the closest page in `overlap.closest_pages`. Fits when `performance.monthly_clicks` is none or very low but `links.referring_domains` is not none, so the links are worth passing on.',
+  prune: 'Remove the page and return 410. Fits when the page has no traffic, `links.referring_domains` is none, there are no conversions, and the page is thin or duplicate.',
   leave: 'No action. Fits when the page performs to its potential, was recently updated, or is a protected page type.',
 };
 
 export interface Candidate { key: string; path: string; title: string }
 
 /** The filtered state for one URL. Only titles, a short excerpt, top queries and named bands. */
-export function buildState(u: UrlData, s: Signals, bands: Bands, competingTitles: Map<string, string>) {
+export function buildState(u: UrlData, s: Signals, bands: Bands, competingTitles: Map<string, string>, closest: Candidate[] = []) {
   return {
     page: {
       url_path: u.path,
@@ -47,6 +47,7 @@ export function buildState(u: UrlData, s: Signals, bands: Bands, competingTitles
         shared_top_20_queries: c.shared >= 10 ? '10_or_more' : c.shared >= 6 ? '6_to_9' : '3_to_5',
         competitor_is_stronger: c.stronger ? 'yes' : 'no',
       })),
+      closest_pages: closest.slice(0, 3).map((c) => ({ url_path: c.path, title: c.title || undefined })),
     },
   };
 }

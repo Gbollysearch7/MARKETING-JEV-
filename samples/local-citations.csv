@@ -1,0 +1,37 @@
+Location ID,Directory,Listed name,Address,Phone,URL
+SO-KES,Google,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,Apple Maps,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,Bing Places,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,Facebook,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,Yelp,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,Yell,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,Thomson Local,Sample Outdoors Keswick,"14 Lake Road, Keswick, CA12 5BX",01632 960101,https://sample-outdoors.example/stores/keswick
+SO-KES,FreeIndex,Sample Outdoors Keswick,"14 Lake Rd, Keswick, CA12 5BX",01632 960199,https://sample-outdoors.example/stores/keswick
+SO-AMB,Google,Sample Outdoors Ambleside,"3 Rydal Road, Ambleside, LA22 9AN",01632 960102,https://sample-outdoors.example/stores/ambleside
+SO-AMB,Apple Maps,SAMPLE OUTDOORS AMBLESIDE,"3 Rydal Rd., Ambleside, la229an",+44 1632 960102,http://www.sample-outdoors.example/stores/ambleside/
+SO-AMB,Bing Places,Sample Outdoors Ambleside,"3 Rydal Road, Ambleside, LA22 9AN",01632 960177,https://sample-outdoors.example/stores/ambleside
+SO-AMB,Facebook,Sample Outdoors Ambleside,"3 Rydal Road, Ambleside, LA22 9AN",01632 960102,https://sample-outdoors.example/stores/ambleside
+SO-AMB,Yell,Sample Outdoors Ambleside Ltd,"3 Rydal Road, Ambleside, Cumbria, LA22 9AN",+44 (0)1632 960102,https://sample-outdoors.example/stores/ambleside
+SO-AMB,Thomson Local,Sample Outdoors Ambleside,"3 Rydal Road, Ambleside, LA22 9AN",01632 960102,https://sample-outdoors.example/stores/ambleside
+SO-FTW,Google,Sample Outdoor Store Fort William,"88 High Street, Fort William, PH33 6AD",01632 960103,https://sample-outdoors.example/stores/fort-william
+SO-FTW,Apple Maps,Sample Outdoors Fort William,"88 High Street, Fort William, PH33 6AD",01632 960103,https://sample-outdoors.example/stores/fort-william
+SO-FTW,Bing Places,Sample Outdoors Fort William,"88 High Street, Fort William, PH33 6AD",01632 960103,https://sample-outdoors.example/stores/fort-william
+SO-FTW,Facebook,Sample Outdoors Fort William,"12 Station Square, Fort William, PH33 6AN",01632 960103,https://sample-outdoors.example/stores/fort-william
+SO-FTW,Yelp,Sample Outdoors Fort William,"88 High Street, Fort William, PH33 6AD",01632 960103,https://old-sample-outdoors.example
+SO-FTW,Yell,Sample Outdoors Fort William,"88 High Street, Fort William, PH33 6AD",01632 960103,https://sample-outdoors.example/stores/fort-william
+SO-BYC,Google,Sample Outdoors Betws-y-Coed,"Holyhead Road, Betws-y-Coed, LL24 0BW",01632 960104,https://sample-outdoors.example/stores/betws-y-coed
+SO-BYC,Apple Maps,Sample Outdoors Betws-y-Coed,"Holyhead Road, Betws-y-Coed, LL24 0WB",01632 960104,https://sample-outdoors.example/stores/betws-y-coed
+SO-BYC,Bing Places,Sample Outdoors Betws-y-Coed,"Holyhead Road, Betws-y-Coed, LL24 0BW",01632 960104,https://sample-outdoors.example/stores/betws-y-coed
+SO-BYC,Yelp,Sample Outdoors Betws-y-Coed,"Holyhead Road, Betws-y-Coed, LL24 0BW",01632 960104,https://sample-outdoors.example/stores/betws-y-coed
+SO-BYC,Yelp,Sample Outdoors Betws y Coed,"Holyhead Road, Betws-y-Coed, LL24 0BW",01632 960104,
+SO-BYC,Thomson Local,Sample Outdoors Betws-y-Coed,"Holyhead Road, Betws-y-Coed, LL24 0BW",01632 960104,https://sample-outdoors.example/stores/betws-y-coed
+SO-HAT,Google,Sample Outdoors Hathersage,"5 Main Road, Hathersage, S32 1BB",01632 960105,https://sample-outdoors.example/stores/hathersage
+SO-HAT,Apple Maps,Sample Outdoors Hathersage,"5 Main Road, Hathersage, S32 1BB",01632 960105,https://sample-outdoors.example/stores/hathersage
+SO-HAT,Bing Places,Sample Outdoors Hathersage,"5 Main Road, Hathersage, S32 1BB",01632 960105,https://sample-outdoors.example/stores/hathersage
+SO-HAT,Facebook,Sample Outdoors Hathersage,"5 Main Road, Hathersage, S32 1BB",01632 960105,https://sample-outdoors.example/stores/hathersage
+SO-HAT,Yell,Sample Outdoors Hathersage,"5 Main Road, Hathersage, S32 1BB",01632 960105,https://sample-outdoors.example/stores/hathersage
+SO-AVI,Google,Sample Outdoors Aviemore,"102 Grampian Road, Aviemore, PH22 1RH",01632 960160,https://sample-outdoors.example/stores/aviemore
+SO-AVI,Apple Maps,Sample Outdoors Aviemore,"102 Grampian Road, Aviemore, PH22 1RH",01632 960106,https://sample-outdoors.example/stores/aviemore
+SO-AVI,Bing Places,Sample Outdoors Aviemore,"102 Grampian Road, Aviemore, PH22 1RH",01632 960106,https://sample-outdoors.example/stores/aviemore
+SO-AVI,Facebook,Sample Outdoors Aviemore,"102 Grampian Road, Aviemore, PH22 1RH",01632 960106,https://sample-outdoors.example/stores/aviemore
+SO-AVI,Thomson Local,Sample Outdoors Aviemore,"120 Grampian Road, Aviemore, PH22 1RH",01632 960106,https://sample-outdoors.example/stores/aviemore

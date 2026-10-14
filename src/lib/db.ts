@@ -4,6 +4,31 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 const SCHEMA = `
+create table if not exists accounts (
+  id text primary key,
+  name text not null,
+  plan text not null default 'trial',          -- trial | starter | growth | scale
+  trial_ends_at text not null,
+  subscription_status text,                    -- active | trialing | past_due | canceled | null
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  created_at text not null
+);
+create table if not exists users (
+  id text primary key,
+  account_id text not null references accounts(id) on delete cascade,
+  email text not null unique,
+  name text not null,
+  password_hash text not null,
+  role text not null default 'owner',           -- owner | member
+  created_at text not null
+);
+create table if not exists sessions (
+  token_hash text primary key,
+  user_id text not null references users(id) on delete cascade,
+  expires_at text not null,
+  created_at text not null
+);
 create table if not exists sites (
   id text primary key,
   name text not null,
@@ -148,7 +173,15 @@ create table if not exists outcomes (
 );
 `;
 
-const globalForDb = globalThis as unknown as { __db?: Database.Database };
+const globalForDb = globalThis as unknown as { __db?: Database.Database; __schema?: string };
+
+/** Create missing tables and columns. Safe to run repeatedly. */
+function migrate(d: Database.Database) {
+  d.exec(SCHEMA);
+  // Sites created before accounts existed have no owner; add the column and let the first sign-up claim them.
+  const cols = d.prepare('pragma table_info(sites)').all() as { name: string }[];
+  if (!cols.some((c) => c.name === 'account_id')) d.exec('alter table sites add column account_id text references accounts(id) on delete cascade');
+}
 
 export function dataDir(): string {
   return path.resolve(process.env.DATA_DIR ?? path.join(process.cwd(), 'data'));
@@ -160,10 +193,15 @@ export function db(): Database.Database {
     const d = new Database(path.join(dataDir(), 'app.db'));
     d.pragma('journal_mode = WAL');
     d.pragma('foreign_keys = ON');
-    d.exec(SCHEMA);
+    migrate(d);
+    globalForDb.__schema = SCHEMA;
     // Jobs cannot survive a server restart; mark any left running as interrupted.
     d.prepare(`update jobs set status = 'failed', error = 'Interrupted by a server restart. Run it again.', finished_at = ? where status = 'running'`).run(new Date().toISOString());
     globalForDb.__db = d;
+  } else if (globalForDb.__schema !== SCHEMA) {
+    // In development the connection survives code reloads; apply schema changes to it.
+    migrate(globalForDb.__db);
+    globalForDb.__schema = SCHEMA;
   }
   return globalForDb.__db;
 }

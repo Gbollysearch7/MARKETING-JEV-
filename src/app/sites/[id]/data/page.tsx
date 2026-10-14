@@ -1,8 +1,11 @@
+import { requireSite } from '@/lib/auth';
 import Link from 'next/link';
 import { JobProgress } from '@/components/JobProgress';
+import { CrawlForm } from '@/components/SiteForms';
+import { SubmitButton } from '@/components/SubmitButton';
 import { UploadCard } from '@/components/UploadCard';
 import { Empty, fmt, fmtDate, fmtDateTime, Pager, PageTitle, qs, Section } from '@/components/ui';
-import { deleteUploadAction, loadSamplesAction, startCrawlAction } from '@/lib/actions';
+import { deleteUploadAction, loadSamplesAction } from '@/lib/actions';
 import { getSite, latestUploads, listUploads, listUrls, runningJob, templates, type Upload } from '@/lib/repo';
 
 const KIND_LABEL: Record<string, string> = { gsc_pages: 'Search Console pages', gsc_queries: 'Page and query data', ga4: 'GA4 landing pages', crawl: 'Crawl', backlinks: 'Backlinks' };
@@ -23,6 +26,7 @@ function Current({ u, empty }: { u?: Upload; empty: string }) {
 
 export default async function DataPage({ params, searchParams }: PageProps<'/sites/[id]/data'>) {
   const { id } = await params;
+  const { viewer } = await requireSite(id);
   const sp = (await searchParams) as Record<string, string | undefined>;
   const site = getSite(id)!;
   const latest = latestUploads(id);
@@ -37,34 +41,36 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
     <div className="space-y-6">
       <PageTitle
         title="Data"
-        sub="Upload exports from Search Console, GA4, your crawler and your backlink tool. Everything is joined by URL path. Nothing connects to Google yet, so no Google approval is needed."
+        sub="Start with a Search Console export or a site crawl. Add analytics and backlinks to strengthen your recommendations."
         actions={all.length === 0 ? (
-          <form action={loadSamplesAction}><input type="hidden" name="siteId" value={id} /><button className="btn">Load sample data</button></form>
+          <form action={loadSamplesAction}><input type="hidden" name="siteId" value={id} /><SubmitButton pending="Loading…">Load sample data</SubmitButton></form>
         ) : null}
       />
 
-      {running && <JobProgress jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling sitemap' : 'Scoring URLs'} />}
+      {running && <JobProgress key={running.id} jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling sitemap' : 'Scoring URLs'} />}
 
+      <section aria-label="Data coverage" className="card flex flex-wrap items-center justify-between gap-4 p-5">
+        <div><h2 className="font-semibold">{latest.gsc_pages || latest.gsc_queries || latest.crawl ? 'Ready to score' : 'First, import your pages'}</h2>
+          <p className="mt-1 text-[13px] text-muted">{latest.gsc_pages || latest.gsc_queries || latest.crawl ? 'Review the joined URLs below before starting a scoring run.' : 'Choose Search Console or Crawl below. Other sources can be added later.'}</p>
+          <p className="mt-1 text-[12px] text-muted">Analytics protects converting pages. Page-and-query data enables cannibalisation checks. Backlinks help identify valuable pages.</p>
+        </div>
+        {(latest.gsc_pages || latest.gsc_queries || latest.crawl) && <Link className="btn btn-primary" href={`/sites/${id}`}>Continue to scoring →</Link>}
+      </section>
       <div className="grid gap-4 md:grid-cols-2">
         <UploadCard
-          siteId={id} slot="gsc" title="Search Console" accept=".zip,.csv,.tsv,.txt" multiple
+          siteId={id} slot="gsc" title="Search Console" accept=".zip,.csv,.tsv,.txt" multiple ready={Boolean(latest.gsc_pages || latest.gsc_queries)}
           help={<>Performance &gt; Export &gt; Download CSV gives a zip. Turn on <b>Compare</b> first so decay shows. For more than 1,000 pages or for cannibalisation, also upload a page and query CSV from Looker Studio, BigQuery or Search Analytics for Sheets.</>}
           current={<div className="space-y-2"><Current u={latest.gsc_pages} empty="No pages export yet" /><Current u={latest.gsc_queries} empty="No page and query data yet" /></div>}
         />
         <UploadCard
-          siteId={id} slot="ga4" title="GA4" accept=".csv"
+          siteId={id} slot="ga4" title="GA4" accept=".csv" ready={Boolean(latest.ga4)}
           help={<>Reports &gt; Engagement &gt; Landing page, then Share &gt; Download file &gt; CSV. Sessions and key events protect converting pages from being pruned.</>}
           current={<Current u={latest.ga4} empty="No GA4 export yet" />}
         />
-        <div className="card flex flex-col p-4">
-          <h3 className="font-semibold">Crawl</h3>
+        <div className="card flex flex-col p-5">
+          <h3 className="flex items-center gap-2 font-semibold">Crawl<span className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11.5px] font-medium ${latest.crawl ? 'bg-ok-bg text-ok' : 'bg-sunken text-muted'}`}><span className={`h-1.5 w-1.5 rounded-full ${latest.crawl ? 'bg-ok' : 'bg-[var(--line-input)]'}`} />{latest.crawl ? 'Ready' : 'Missing'}</span></h3>
           <p className="mt-1 text-[13px] text-muted">Crawl the sitemap here, up to 10,000 pages. For bigger sites, upload a Screaming Frog &quot;Internal: HTML&quot; or Sitebulb export instead.</p>
-          <form action={startCrawlAction} className="mt-3 flex flex-wrap gap-2">
-            <input type="hidden" name="siteId" value={id} />
-            <input name="sitemap" type="url" required defaultValue={site.sitemap_url ?? `https://${site.domain}/sitemap.xml`} className="input min-w-[220px] flex-1" aria-label="Sitemap URL" />
-            <input name="limit" type="number" min={1} max={10000} defaultValue={500} className="input w-24" aria-label="Page limit" />
-            <button className="btn" disabled={Boolean(running)}>Crawl</button>
-          </form>
+          <CrawlForm siteId={id} sitemap={site.sitemap_url ?? `https://${site.domain}/sitemap.xml`} limit={Math.min(10000, viewer.status.urlLimit)} running={Boolean(running)} active={viewer.status.active} />
           <div className="mt-3 border-t border-line pt-3 text-[13px]"><Current u={latest.crawl} empty="No crawl yet" /></div>
         </div>
         <UploadCard
@@ -73,7 +79,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
           current={<span className="text-muted">Replaces the crawl above when uploaded.</span>}
         />
         <UploadCard
-          siteId={id} slot="backlinks" title="Backlinks (optional)" accept=".csv,.tsv,.txt"
+          siteId={id} slot="backlinks" title="Backlinks (optional)" accept=".csv,.tsv,.txt" ready={Boolean(latest.backlinks)}
           help={<>Ahrefs Site Explorer &gt; Best by links, or Semrush Indexed pages. Referring domains decide Redirect versus Prune.</>}
           current={<Current u={latest.backlinks} empty="No backlinks export yet" />}
         />
@@ -83,13 +89,13 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
         title="URLs"
         sub={`${fmt(total)} URLs after joining the latest uploads.`}
         actions={
-          <form className="flex flex-wrap gap-2">
-            <input name="q" defaultValue={sp.q} placeholder="Filter by path or title" className="input w-56" />
-            <select name="template" defaultValue={sp.template ?? ''} className="select">
+          <form key={JSON.stringify(filters)} className="flex flex-wrap gap-2">
+            <input name="q" defaultValue={sp.q} aria-label="Filter URLs by path or title" placeholder="Filter by path or title" className="input w-56" />
+            <select aria-label="Page template" name="template" defaultValue={sp.template ?? ''} className="select">
               <option value="">All templates</option>
               {tpls.map((t) => <option key={t.template} value={t.template}>{t.template} ({t.n})</option>)}
             </select>
-            <select name="sort" defaultValue={sp.sort ?? 'clicks'} className="select">
+            <select aria-label="Sort URLs" name="sort" defaultValue={sp.sort ?? 'clicks'} className="select">
               <option value="clicks">Most clicks</option><option value="impressions">Most impressions</option><option value="sessions">Most sessions</option><option value="position">Best position</option><option value="path">Path A to Z</option>
             </select>
             <button className="btn">Apply</button>
@@ -97,7 +103,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
         }
       >
         {rows.length === 0 ? (
-          <Empty title="No URLs yet">Upload a Search Console export or crawl the sitemap.</Empty>
+          <Empty title={sp.q || sp.template ? "No matching URLs" : "No URLs yet"}>{sp.q || sp.template ? <Link href={`/sites/${id}/data`} className="underline">Clear filters</Link> : "Upload a Search Console export or crawl the sitemap."}</Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="tbl">
@@ -147,7 +153,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
                   <td className="r num">{fmt(u.row_count)}</td>
                   <td className="text-muted">{fmtDateTime(u.created_at)}</td>
                   <td className="r">
-                    <form action={deleteUploadAction}><input type="hidden" name="siteId" value={id} /><input type="hidden" name="uploadId" value={u.id} /><button className="btn btn-sm">Remove</button></form>
+                    <form action={deleteUploadAction}><input type="hidden" name="siteId" value={id} /><input type="hidden" name="uploadId" value={u.id} /><details className="text-left"><summary className="cursor-pointer text-[12px] text-bad">Remove</summary><label className="mt-2 flex items-start gap-2 text-[12px] text-muted"><input type="checkbox" required />Permanently remove this upload. This cannot be undone.</label><SubmitButton className="btn btn-sm mt-2 text-bad" pending="Removing…">Remove upload</SubmitButton></details></form>
                   </td>
                 </tr>
               ))}

@@ -92,8 +92,21 @@ describe('verdicts on the sample site', async () => {
     expect(v.rulesApplied.join(' ')).toMatch(/conversions/);
     expect(['prune', 'redirect']).not.toContain(v.verdict);
   });
-  it('never prunes a page updated in the last 30 days', () => {
-    expect(by('/guides/new-route-0').verdict).not.toBe('prune');
+  it('never prunes or redirects a page updated in the last 30 days', () => {
+    for (const p of ['/guides/new-route-0', '/guides/new-route-1', '/guides/new-route-2']) {
+      expect(['prune', 'redirect']).not.toContain(by(p).verdict);
+      expect(by(p).rulesApplied.join(' ')).toMatch(/never pruned or redirected/);
+    }
+  });
+  it('removes Refresh and Expand from pages with no search demand', () => {
+    const v = by('/blog/spring-sale-camping-stove');
+    expect(v.rulesApplied.join(' ')).toMatch(/No search demand/);
+    expect(Object.keys(v.probabilities)).not.toContain('refresh');
+    expect(Object.keys(v.probabilities)).not.toContain('expand');
+  });
+  it('finds the matching guide as the redirect destination for an old sale page', () => {
+    const v = by('/blog/spring-sale-camping-stove');
+    expect((v.state as { overlap: { closest_pages: { url_path: string }[] } }).overlap.closest_pages[0].url_path).toBe('/guides/best-camping-stove');
   });
   it('detects cannibalisation on 3+ shared top-20 queries', () => {
     expect(res.pairs.some((p) => [p.a, p.b].includes('/guides/how-to-choose-hiking-boots'))).toBe(true);
