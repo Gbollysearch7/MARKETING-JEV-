@@ -1,0 +1,55 @@
+# Fly.io config for Rankcall in London. SQLite allows one writer, so run exactly ONE machine with ONE volume.
+# First deploy: see docs/DEPLOY.md (fly launch --no-deploy, fly volumes create, fly secrets set, fly deploy --ha=false).
+app = "rankcall"            # change to your Fly app name
+primary_region = "lhr"
+kill_signal = "SIGTERM"     # Litestream forwards it to the app and flushes the last WAL frames
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # One machine with a volume cannot do blue/green; replace in place (a few seconds of downtime per deploy).
+  strategy = "immediate"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  DATA_DIR = "/data"
+  SCHEDULER_ENABLED = "true"
+  LITESTREAM_REGION = "auto"
+  LITESTREAM_PATH = "rankcall/app.db"
+  # Set APP_URL, APP_SECRET, TYPESAFE_API_KEY, STRIPE_*, GOOGLE_*, LITESTREAM_BUCKET/ENDPOINT/keys with `fly secrets set`.
+
+[[mounts]]
+  source = "rankcall_data"
+  destination = "/data"
+  initial_size = "3gb"
+  auto_extend_size_threshold = 80
+  auto_extend_size_increment = "1gb"
+  auto_extend_size_limit = "20gb"
+  snapshot_retention = 14
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Background jobs and the weekly scheduler run in-process, so the machine must stay up.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

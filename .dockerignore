@@ -1,0 +1,21 @@
+# Keep the build context small and free of secrets and the local database.
+.git
+.gitignore
+node_modules
+.next
+.next-*
+data
+coverage
+*.tsbuildinfo
+next-env.d.ts
+.env*
+!.env.example
+.DS_Store
+npm-debug.log*
+.vercel
+.claude
+test
+docs
+fly.toml
+Dockerfile
+.dockerignore

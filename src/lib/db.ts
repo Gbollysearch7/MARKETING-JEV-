@@ -184,15 +184,18 @@ function migrate(d: Database.Database) {
 }
 
 export function dataDir(): string {
-  return path.resolve(process.env.DATA_DIR ?? path.join(process.cwd(), 'data'));
+  return path.resolve(/*turbopackIgnore: true*/ process.env.DATA_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), 'data'));
 }
 
 export function db(): Database.Database {
   if (!globalForDb.__db) {
     mkdirSync(dataDir(), { recursive: true });
-    const d = new Database(path.join(dataDir(), 'app.db'));
+    const d = new Database(path.join(/*turbopackIgnore: true*/ dataDir(), 'app.db'));
     d.pragma('journal_mode = WAL');
     d.pragma('foreign_keys = ON');
+    // Litestream reads the WAL while the app writes; wait briefly for its lock instead of failing.
+    d.pragma('busy_timeout = 5000');
+    d.pragma('synchronous = NORMAL');
     migrate(d);
     globalForDb.__schema = SCHEMA;
     // Jobs cannot survive a server restart; mark any left running as interrupted.

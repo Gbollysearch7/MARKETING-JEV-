@@ -4,10 +4,13 @@ import { JobProgress } from '@/components/JobProgress';
 import { CrawlForm } from '@/components/SiteForms';
 import { SubmitButton } from '@/components/SubmitButton';
 import { UploadCard } from '@/components/UploadCard';
+import { GoogleCard, GOOGLE_MESSAGES } from '@/components/google/GoogleCard';
+import { Toast } from '@/components/Toast';
 import { Empty, fmt, fmtDate, fmtDateTime, Pager, PageTitle, qs, Section } from '@/components/ui';
 import { deleteUploadAction, loadSamplesAction } from '@/lib/actions';
 import { getSite, latestUploads, listUploads, listUrls, runningJob, templates, type Upload } from '@/lib/repo';
 
+const SOURCE_TAG: Record<string, string> = { sample: 'sample', google_api: 'Google' };
 const KIND_LABEL: Record<string, string> = { gsc_pages: 'Search Console pages', gsc_queries: 'Page and query data', ga4: 'GA4 landing pages', crawl: 'Crawl', backlinks: 'Backlinks' };
 const SIZE = 50;
 
@@ -17,7 +20,7 @@ function Current({ u, empty }: { u?: Upload; empty: string }) {
     <div>
       <div className="font-medium">{u.filename}</div>
       <div className="text-muted">
-        {fmt(u.row_count)} rows{u.period_start ? ` · ${fmtDate(u.period_start)} to ${fmtDate(u.period_end)}` : ''} · {u.source === 'sample' ? 'sample data' : `added ${fmtDateTime(u.created_at)}`}
+        {fmt(u.row_count)} rows{u.period_start ? ` · ${fmtDate(u.period_start)} to ${fmtDate(u.period_end)}` : ''} · {u.source === 'google_api' ? `synced from Google ${fmtDateTime(u.created_at)}` : u.source === 'sample' ? 'sample data' : `added ${fmtDateTime(u.created_at)}`}
       </div>
       {u.notes.map((n) => <div key={n} className="mt-1 text-[12.5px] text-muted">{n}</div>)}
     </div>
@@ -36,6 +39,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
   const { rows, total } = listUrls(id, { q: sp.q, template: sp.template, sort: sp.sort, limit: SIZE, offset: (page - 1) * SIZE });
   const tpls = templates(id);
   const filters = { q: sp.q, template: sp.template, sort: sp.sort };
+  const googleMsg = sp.google ? GOOGLE_MESSAGES[sp.google] : undefined;
 
   return (
     <div className="space-y-6">
@@ -47,7 +51,8 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
         ) : null}
       />
 
-      {running && <JobProgress key={running.id} jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling sitemap' : 'Scoring URLs'} />}
+      {googleMsg && <Toast key={sp.google} message={googleMsg.text} tone={googleMsg.tone} />}
+      {running && running.type !== 'google_sync' && <JobProgress key={running.id} jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling sitemap' : 'Scoring URLs'} />}
 
       <section aria-label="Data coverage" className="card flex flex-wrap items-center justify-between gap-4 p-5">
         <div><h2 className="font-semibold">{latest.gsc_pages || latest.gsc_queries || latest.crawl ? 'Ready to score' : 'First, import your pages'}</h2>
@@ -56,6 +61,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
         </div>
         {(latest.gsc_pages || latest.gsc_queries || latest.crawl) && <Link className="btn btn-primary" href={`/sites/${id}`}>Continue to scoring →</Link>}
       </section>
+      <GoogleCard siteId={id} domain={site.domain} />
       <div className="grid gap-4 md:grid-cols-2">
         <UploadCard
           siteId={id} slot="gsc" title="Search Console" accept=".zip,.csv,.tsv,.txt" multiple ready={Boolean(latest.gsc_pages || latest.gsc_queries)}
@@ -148,7 +154,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
               {all.map((u) => (
                 <tr key={u.id}>
                   <td>{KIND_LABEL[u.kind]}</td>
-                  <td className="max-w-[280px] truncate" title={u.filename}>{u.filename}{u.source === 'sample' && <span className="ml-2 rounded bg-sunken px-1.5 text-[11px] text-muted">sample</span>}</td>
+                  <td className="max-w-[280px] truncate" title={u.filename}>{u.filename}{SOURCE_TAG[u.source] && <span className="ml-2 rounded bg-sunken px-1.5 text-[11px] text-muted">{SOURCE_TAG[u.source]}</span>}</td>
                   <td className="whitespace-nowrap text-muted">{u.period_start ? `${fmtDate(u.period_start)} to ${fmtDate(u.period_end)}` : '—'}</td>
                   <td className="r num">{fmt(u.row_count)}</td>
                   <td className="text-muted">{fmtDateTime(u.created_at)}</td>

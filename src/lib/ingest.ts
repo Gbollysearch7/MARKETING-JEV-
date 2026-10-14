@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { importBacklinks } from '@/engine/ingest/backlinks';
 import { importCrawlCsv } from '@/engine/ingest/crawl-csv';
-import { importGa4 } from '@/engine/ingest/ga4';
-import { importGsc } from '@/engine/ingest/gsc';
+import { importGa4, type Ga4Import } from '@/engine/ingest/ga4';
+import { importGsc, type GscImport } from '@/engine/ingest/gsc';
 import { saveUpload, type Upload } from './repo';
 import { measureOutcomes } from './tasks';
 
@@ -37,6 +37,26 @@ export function ingestFile(siteId: string, slot: Slot, filename: string, bytes: 
       return saveUpload(siteId, 'backlinks', source, filename, { pages: b.pages }, null, b.pages.length, b.notes);
     }
   }
+}
+
+/**
+ * Store data fetched from an API (Google Search Console or GA4) as an upload of the same kind a CSV
+ * import would create, so siteInputs() and scoring use it unchanged. `source` marks where it came from.
+ */
+export function ingestApiData(siteId: string, input:
+  | { kind: 'gsc_pages' | 'gsc_queries'; data: GscImport; label: string }
+  | { kind: 'ga4'; data: Ga4Import; label: string }, source = 'google_api'): Upload | null {
+  if (input.kind === 'ga4') {
+    const g = input.data;
+    if (!g.pages.length) return null;
+    return saveUpload(siteId, 'ga4', source, input.label, g, g.period, g.pages.length, g.notes);
+  }
+  const g = input.data;
+  if (!g.pages.length) return null;
+  const rows = input.kind === 'gsc_queries' ? g.pageQueries.length : g.pages.length;
+  const u = saveUpload(siteId, input.kind, source, input.label, g, g.period, rows, g.notes);
+  measureOutcomes(siteId);
+  return u;
 }
 
 export const SAMPLE_FILES: [Slot, string][] = [

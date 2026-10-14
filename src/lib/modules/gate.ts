@@ -8,7 +8,8 @@ import { pathKey, templateOf } from '@/engine/ingest/url';
 import { GATE_CRITERIA_VERSION } from '@/modules/gate/battery';
 import { queryImpressionMap } from '@/modules/gate/checks';
 import { mockGateAnswer } from '@/modules/gate/mock';
-import { MAX_BATCH_PAGES, parseGateCsv } from '@/modules/gate/parse';
+import { parseApiPages } from '@/modules/gate/api';
+import { MAX_BATCH_PAGES, normalisePage, parseGateCsv, type RawPage } from '@/modules/gate/parse';
 import { templateReport, type TemplateRow } from '@/modules/gate/report';
 import { runGate } from '@/modules/gate/run';
 import { stripHtml } from '@/modules/gate/text';
@@ -19,8 +20,8 @@ import { getProvider } from '@/lib/provider';
 import { getJob, listUploads, siteInputs, uploadData, type Job } from '@/lib/repo';
 
 export const GATE_JOB = 'gate';
-export type BatchSource = 'csv' | 'sitemap' | 'urls' | 'paste' | 'api' | 'sample';
-export const SOURCE_LABEL: Record<BatchSource, string> = { csv: 'CSV', sitemap: 'Sitemap', urls: 'URL list', paste: 'Single page', api: 'API', sample: 'Sample data' };
+export type BatchSource = 'csv' | 'sitemap' | 'urls' | 'paste' | 'api' | 'sample' | 'wordpress' | 'webflow';
+export const SOURCE_LABEL: Record<BatchSource, string> = { csv: 'CSV', sitemap: 'Sitemap', urls: 'URL list', paste: 'Single page', api: 'API', sample: 'Sample data', wordpress: 'WordPress', webflow: 'Webflow' };
 
 export interface GateBatch {
   id: string; site_id: string; name: string; source: BatchSource; status: 'queued' | 'running' | 'done' | 'failed';
@@ -392,4 +393,50 @@ export function pageJson(r: GatePageRow, flagged?: Set<string>) {
     indexed_without_impressions: flagged ? flagged.has(r.path) : undefined,
     model: r.model,
   };
+}
+
+// ---------- API intake (session route, /api/v1 and CMS plugins) ----------
+
+export interface ApiCheckResult { status: number; json: Record<string, unknown> }
+
+/**
+ * Validate `{ pages: [...], name? }`, score the pages synchronously and build the response body.
+ * Shared by POST /api/sites/[id]/gate/check and POST /api/v1/gate/check so both answer identically.
+ */
+export async function checkPagesForApi(siteId: string, body: unknown, source: BatchSource = 'api'): Promise<ApiCheckResult> {
+  const parsed = parseApiPages(body);
+  if (!parsed.ok) return { status: parsed.status, json: { error: parsed.error, code: parsed.code, ...(parsed.details ? { details: parsed.details } : {}) } };
+  const { pages: kept, notes } = parsed;
+
+  const name = parsed.name ?? `${source === 'wordpress' ? 'WordPress' : 'API'} batch of ${kept.length}`;
+  const batch = createBatch(siteId, name, source, kept, notes);
+  const started = Date.now();
+  const { finished } = startGateJob(siteId, batch.id);
+  await finished;
+  const done = getBatch(batch.id)!;
+  if (done.status === 'failed') return { status: 502, json: { error: done.error ?? 'Scoring failed', code: 'scoring_failed', batch_id: done.id } };
+  const flagged = indexedWithoutImpressions(siteId, done);
+  return {
+    status: 200,
+    json: {
+      batch_id: done.id,
+      url: `/sites/${siteId}/gate/${done.id}`,
+      model: done.model,
+      criteria_version: GATE_CRITERIA_VERSION,
+      elapsed_ms: Date.now() - started,
+      counts: done.counts,
+      templates: done.templates.map((t) => ({ template: t.template, pages: t.pages, counts: t.counts, most_common_failure: t.topFailureLabel, pause_template: t.pause })),
+      notes: done.notes,
+      pages: listGatePages(done.id).sort((a, b) => a.idx - b.idx).map((r) => pageJson(r, flagged)),
+    },
+  };
+}
+
+/** Score one page that arrived by webhook, in the background (webhook senders expect a fast 200). */
+export function startWebhookBatch(siteId: string, name: string, source: BatchSource, raw: RawPage, notes: string[] = []): GateBatch | string {
+  const p = normalisePage(raw, 0);
+  if (typeof p === 'string') return p;
+  const batch = createBatch(siteId, name, source, [p], notes);
+  startGateJob(siteId, batch.id);
+  return batch;
 }

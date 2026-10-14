@@ -1,0 +1,91 @@
+path,expert_verdict,notes
+/,leave,Sample label: Doing its job; no change needed.
+/about,leave,Sample label: Doing its job; no change needed.
+/basket,leave,Sample label: Doing its job; no change needed.
+/blog/spring-sale-camping-stove,redirect,Sample label: No search traffic but has links; point it at the closest page.
+/blog/spring-sale-hiking-boots,redirect,Sample label: No search traffic but has links; point it at the closest page.
+/blog/spring-sale-sleeping-bag,redirect,Sample label: No search traffic but has links; point it at the closest page.
+/blog/spring-sale-tent,redirect,Sample label: No search traffic but has links; point it at the closest page.
+/blog/spring-sale-trail-running-shoes,redirect,Sample label: No search traffic but has links; point it at the closest page.
+/blog/spring-sale-waterproof-jackets,redirect,Sample label: No search traffic but has links; point it at the closest page.
+/contact,leave,Sample label: Doing its job; no change needed.
+/cookie-policy,refresh,Sample label: Traffic falling against last period; update it.
+/guides/best-base-layers,leave,Sample label: Doing its job; no change needed.
+/guides/best-bivvy-bag,refresh,Sample label: Traffic falling against last period; update it.
+/guides/best-bothy,leave,Sample label: Doing its job; no change needed.
+/guides/best-camping-stove,refresh,Sample label: Traffic falling against last period; update it.
+/guides/best-compass,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/best-down-jacket,leave,Sample label: Doing its job; no change needed.
+/guides/best-gaiters,leave,Sample label: Doing its job; no change needed.
+/guides/best-head-torch,refresh,Sample label: Traffic falling against last period; update it.
+/guides/best-hiking-boots,leave,Sample label: Doing its job; no change needed.
+/guides/best-map-reading,leave,Sample label: Doing its job; no change needed.
+/guides/best-rucksack,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/best-scrambling,refresh,Sample label: Traffic falling against last period; update it.
+/guides/best-sleeping-bag,leave,Sample label: Doing its job; no change needed.
+/guides/best-tent,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/best-trail-running-shoes,leave,Sample label: Doing its job; no change needed.
+/guides/best-via-ferrata,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/best-walking-poles,leave,Sample label: Doing its job; no change needed.
+/guides/best-water-filter,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/best-waterproof-jackets,refresh,Sample label: Traffic falling against last period; update it.
+/guides/best-wild-camping,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-base-layers,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-bivvy-bag,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-bothy,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-camping-stove,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-compass,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-down-jacket,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-gaiters,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-head-torch,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-hiking-boots,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-map-reading,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-rucksack,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-scrambling,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-sleeping-bag,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-tent,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-trail-running-shoes,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-via-ferrata,expand,Sample label: Ranks on page two for real demand; add depth.
+/guides/how-to-choose-walking-poles,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-water-filter,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-waterproof-jackets,leave,Sample label: Doing its job; no change needed.
+/guides/how-to-choose-wild-camping,leave,Sample label: Doing its job; no change needed.
+/guides/new-route-0,leave,Sample label: Doing its job; no change needed.
+/guides/new-route-1,leave,Sample label: Doing its job; no change needed.
+/guides/new-route-2,leave,Sample label: Doing its job; no change needed.
+/news/store-update-2019-0,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2019-12,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2019-4,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2019-8,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2020-1,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2020-13,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2020-5,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2020-9,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2021-10,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2021-2,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2021-6,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2022-11,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2022-3,prune,"Sample label: No traffic, no links, thin; remove it."
+/news/store-update-2022-7,prune,"Sample label: No traffic, no links, thin; remove it."
+/privacy-policy,leave,Sample label: Doing its job; no change needed.
+/products/base-layers/trailmaster-8,leave,Sample label: Doing its job; no change needed.
+/products/bivvy-bag/trailmaster-13,leave,Sample label: Doing its job; no change needed.
+/products/bothy/trailmaster-19,leave,Sample label: Doing its job; no change needed.
+/products/camping-stove/trailmaster-5,leave,Sample label: Doing its job; no change needed.
+/products/compass/trailmaster-14,leave,Sample label: Doing its job; no change needed.
+/products/down-jacket/trailmaster-11,leave,Sample label: Doing its job; no change needed.
+/products/gaiters/trailmaster-12,leave,Sample label: Doing its job; no change needed.
+/products/head-torch/trailmaster-9,leave,Sample label: Doing its job; no change needed.
+/products/hiking-boots/trailmaster-0,leave,Sample label: Doing its job; no change needed.
+/products/map-reading/trailmaster-15,leave,Sample label: Doing its job; no change needed.
+/products/rucksack/trailmaster-6,leave,Sample label: Doing its job; no change needed.
+/products/scrambling/trailmaster-17,leave,Sample label: Doing its job; no change needed.
+/products/sleeping-bag/trailmaster-3,leave,Sample label: Doing its job; no change needed.
+/products/tent/trailmaster-2,leave,Sample label: Doing its job; no change needed.
+/products/trail-running-shoes/trailmaster-4,leave,Sample label: Doing its job; no change needed.
+/products/via-ferrata/trailmaster-18,leave,Sample label: Doing its job; no change needed.
+/products/walking-poles/trailmaster-7,leave,Sample label: Doing its job; no change needed.
+/products/water-filter/trailmaster-10,leave,Sample label: Doing its job; no change needed.
+/products/waterproof-jackets/trailmaster-1,leave,Sample label: Doing its job; no change needed.
+/products/wild-camping/trailmaster-16,leave,Sample label: Doing its job; no change needed.
+/terms,leave,Sample label: Doing its job; no change needed.

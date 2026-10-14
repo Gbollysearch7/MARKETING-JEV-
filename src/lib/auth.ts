@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
 import { hashPassword, newToken, sha256, verifyPassword } from './crypto';
 import { db, newId, now } from './db';
+import { apiError, authenticateKey, keyInQuery, logKeyUsage, type Scope } from './apikeys';
 import { accountStatus, TRIAL_DAYS } from './plans';
 import type { Site } from './repo';
 
@@ -98,4 +99,30 @@ export async function siteForRequest(siteId: string): Promise<Site | null> {
   const viewer = await getViewer();
   if (!viewer) return null;
   return (db().prepare('select * from sites where id = ? and account_id = ?').get(siteId, viewer.account.id) as Site | undefined) ?? null;
+}
+
+/**
+ * For API Route Handlers that accept both a signed-in session and an account API key.
+ * With an `Authorization: Bearer` header the key decides (scope, rate limit, active account → 402); without one the
+ * session decides as before. Returns the site and who is calling, or the error Response to send.
+ * Call `done(status)` after building the response so key usage is logged with the final status.
+ */
+export async function siteForApiRequest(request: Request, siteId: string, scope: Scope = 'gate:check', route = new URL(request.url).pathname): Promise<
+  { site: Site; accountId: string; active: boolean; keyId: string | null; done: (status: number) => void } | Response
+> {
+  if (request.headers.has('authorization') || keyInQuery(request.url)) {
+    const auth = authenticateKey(request, scope, route);
+    if (auth instanceof Response) return auth;
+    const site = db().prepare('select * from sites where id = ? and account_id = ?').get(siteId, auth.accountId) as Site | undefined;
+    if (!site) {
+      logKeyUsage(auth.key.id, auth.accountId, route, 404);
+      return apiError(404, 'site_not_found', 'No site with this id in the API key’s account. GET /api/v1/sites lists them.');
+    }
+    return { site, accountId: auth.accountId, active: true, keyId: auth.key.id, done: (status) => logKeyUsage(auth.key.id, auth.accountId, route, status) };
+  }
+  const viewer = await getViewer();
+  if (!viewer) return apiError(401, 'missing_api_key', 'Sign in, or send Authorization: Bearer rk_live_… with an API key.');
+  const site = db().prepare('select * from sites where id = ? and account_id = ?').get(siteId, viewer.account.id) as Site | undefined;
+  if (!site) return apiError(404, 'site_not_found', 'Not found');
+  return { site, accountId: viewer.account.id, active: viewer.status.active, keyId: null, done: () => {} };
 }

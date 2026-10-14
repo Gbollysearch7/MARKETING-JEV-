@@ -22,6 +22,7 @@ export function AuthForm({ mode, next }: { mode: 'login' | 'signup'; next?: stri
       {next && <input type="hidden" name="next" value={next} />}
       {state.error && <p role="alert" className="rounded-lg bg-bad-bg px-3 py-2 text-[13px] text-bad">{state.error}</p>}
       <button className="btn btn-primary h-12 justify-center" disabled={pending}>{pending ? 'One moment…' : mode === 'login' ? 'Sign in' : 'Start the 14-day free trial'}</button>
+      {mode === 'signup' && <p className="text-center text-[12.5px] text-muted">By starting a trial you agree to the <Link className="underline" href="/terms">Terms</Link> and the <Link className="underline" href="/privacy">Privacy policy</Link>.</p>}
       <p className="text-center text-[13px] text-muted">
         {mode === 'login' ? <>New here? <Link className="font-semibold text-accent" href="/signup">Create an account</Link></> : <>Already have an account? <Link className="font-semibold text-accent" href="/login">Sign in</Link></>}
       </p>

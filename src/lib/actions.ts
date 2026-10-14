@@ -10,6 +10,27 @@ import { addLabel, createSite, deleteSite, deleteUpload, getTask, getVerdict, ru
 import { measureOutcomes, taskFromVerdict } from './tasks';
 import { reviewInputError, taskInputError } from './form-validation';
 import { hostOf } from '@/engine/ingest/url';
+import { clientIp, hit, reset } from './ratelimit';
+
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const tooMany = (seconds: number) => ({ error: `Too many attempts. Try again in ${Math.ceil(seconds / 60)} minute${seconds > 60 ? 's' : ''}.` });
+
+/** Ten attempts per 15 minutes per IP and per email, so passwords cannot be guessed at speed. */
+async function authLimit(email: string) {
+  const { headers } = await import('next/headers');
+  const ip = clientIp(await headers());
+  const byIp = hit(`auth:ip:${ip}`, 10, AUTH_WINDOW_MS);
+  if (!byIp.ok) return byIp;
+  return email ? hit(`auth:email:${email.toLowerCase()}`, 10, AUTH_WINDOW_MS) : byIp;
+}
+
+/** The public origin for links sent to Stripe: APP_URL in production, the request host in development. */
+async function appOrigin() {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '');
+  const { headers } = await import('next/headers');
+  const h = await headers();
+  return `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
+}
 
 const str = (v: FormDataEntryValue | null) => (v == null ? '' : String(v).trim());
 
@@ -28,6 +49,8 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   if (!name || !email) return { error: 'Enter your name and email.' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email address.' };
   if (password.length < 10) return { error: 'Use a password of at least 10 characters.' };
+  const limited = await authLimit(email);
+  if (!limited.ok) return tooMany(limited.retryAfterSeconds);
   if (findUserByEmail(email)) return { error: 'An account with this email already exists. Sign in instead.' };
   const user = createAccountWithOwner({ company, name, email, password });
   await startSession(user.id);
@@ -35,8 +58,12 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
 }
 
 export async function signInAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  const user = checkCredentials(str(formData.get('email')), String(formData.get('password') ?? ''));
+  const email = str(formData.get('email'));
+  const limited = await authLimit(email);
+  if (!limited.ok) return tooMany(limited.retryAfterSeconds);
+  const user = checkCredentials(email, String(formData.get('password') ?? ''));
   if (!user) return { error: 'That email and password do not match.' };
+  reset(`auth:email:${email.toLowerCase()}`);
   await startSession(user.id);
   redirect(safePath(str(formData.get('next')), '/sites'));
 }
@@ -73,6 +100,9 @@ export async function createSiteFormAction(_prev: FormState, formData: FormData)
 export async function deleteSiteAction(formData: FormData) {
   const { site } = await requireSite(str(formData.get('siteId')));
   if (String(formData.get('confirmation') ?? '') !== site.name) throw new Error('Type the site name to confirm deletion.');
+  // Give the Google grant back before the site and its stored tokens disappear.
+  const { revokeGoogleForSite } = await import('./google/server');
+  await revokeGoogleForSite(site.id);
   deleteSite(site.id);
   redirect('/sites');
 }
@@ -223,17 +253,12 @@ export async function checkoutAction(formData: FormData) {
   if (!billingConfigured()) throw new Error('Billing is not switched on yet');
   const plan = str(formData.get('plan'));
   if (!['starter', 'growth', 'scale'].includes(plan)) throw new Error('Choose a plan');
-  const { headers } = await import('next/headers');
-  const h = await headers();
-  const origin = `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`;
-  redirect(await checkoutUrl(viewer.account, viewer.user.email, plan as 'starter' | 'growth' | 'scale', origin));
+  redirect(await checkoutUrl(viewer.account, viewer.user.email, plan as 'starter' | 'growth' | 'scale', await appOrigin()));
 }
 
 export async function portalAction() {
   const { portalUrl } = await import('./billing');
   const viewer = await requireViewer();
   if (!viewer.account.stripe_customer_id) throw new Error('No subscription yet');
-  const { headers } = await import('next/headers');
-  const h = await headers();
-  redirect(await portalUrl(viewer.account.stripe_customer_id, `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host')}`));
+  redirect(await portalUrl(viewer.account.stripe_customer_id, await appOrigin()));
 }

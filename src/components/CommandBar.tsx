@@ -8,7 +8,7 @@ type Item = { label: string; href: string; hint?: string; icon?: string; verdict
 
 const PAGES: [string, string, string][] = [
   ['Overview', '', 'overview'], ['Decision inbox', '/inbox', 'inbox'], ['Cannibalisation', '/cannibalisation', 'overlap'], ['Work queue', '/queue', 'queue'],
-  ['Outcomes', '/outcomes', 'outcomes'], ['Monthly report', '/report', 'report'], ['Decision log', '/decisions', 'log'], ['Data sources', '/data', 'data'],
+  ['Outcomes', '/outcomes', 'outcomes'], ['Accuracy', '/accuracy', 'gate'], ['Monthly report', '/report', 'report'], ['Decision log', '/decisions', 'log'], ['Data sources', '/data', 'data'],
   ['Settings', '/settings', 'settings'], ['Quality gate', '/gate', 'gate'], ['Keyword clusters', '/keywords', 'clusters'], ['Brief desk', '/briefs', 'briefs'],
   ['AI visibility', '/visibility', 'eye'], ['Link prospects', '/links', 'link'], ['Local SEO', '/local', 'pin'],
 ];

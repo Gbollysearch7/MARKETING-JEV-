@@ -236,7 +236,7 @@ export default async function Landing() {
         <div className="mx-auto flex max-w-[1180px] flex-wrap items-center justify-between gap-4 px-5 py-8 text-[13px] text-muted sm:px-8">
           <span className="flex items-center gap-3"><Wordmark href={null} size={20} /><span>{BRAND.tagline}</span></span>
           <nav aria-label="Footer" className="flex flex-wrap gap-5">
-            <a href="#how" className="hover:text-ink">How it works</a><a href="#features" className="hover:text-ink">Features</a><a href="#modules" className="hover:text-ink">Modules</a><a href="#pricing" className="hover:text-ink">Pricing</a><Link href="/login" className="hover:text-ink">Sign in</Link>
+            <a href="#how" className="hover:text-ink">How it works</a><a href="#features" className="hover:text-ink">Features</a><a href="#modules" className="hover:text-ink">Modules</a><a href="#pricing" className="hover:text-ink">Pricing</a><Link href="/login" className="hover:text-ink">Sign in</Link><Link href="/privacy" className="hover:text-ink">Privacy</Link><Link href="/terms" className="hover:text-ink">Terms</Link><Link href="/security" className="hover:text-ink">Security</Link>
             <ThemeToggle compact />
           </nav>
         </div>

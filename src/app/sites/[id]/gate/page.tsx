@@ -9,6 +9,7 @@ import { pctOf, SplitBar } from '@/components/gate/bits';
 import { batchJob, listBatches, SOURCE_LABEL } from '@/lib/modules/gate';
 import { checkOnePageAction, checkUrlsAction, loadGateSampleAction } from '@/lib/modules/gate-actions';
 import { providerInfo } from '@/lib/provider';
+import { Integrations } from './integrations';
 
 const TABS = [
   { key: 'csv', label: 'CSV' },
@@ -127,15 +128,17 @@ export default async function Gate({ params, searchParams }: PageProps<'/sites/[
 
           {tab === 'api' && (
             <div className="flex flex-col gap-3 text-[14px]">
-              <p>Send pages from your build or publishing pipeline and get one verdict per page back in the response.</p>
-              <pre className="mono overflow-x-auto rounded-xl bg-sunken px-4 py-3 text-[12.5px] leading-relaxed">{`POST /api/sites/${id}/gate/check
+              <p>Send pages from your build or publishing pipeline and get one verdict per page back in the response. Authenticate with an <Link href="/settings#api-keys" className="underline underline-offset-2">API key</Link> that has the <span className="mono">gate:check</span> scope.</p>
+              <pre className="mono overflow-x-auto rounded-xl bg-sunken px-4 py-3 text-[12.5px] leading-relaxed">{`POST /api/v1/gate/check
+Authorization: Bearer rk_live_…
 Content-Type: application/json
 
-{ "name": "October location pages",
+{ "site": "${id}",
+  "name": "October location pages",
   "pages": [ { "url": "/walks/keswick", "title": "Walks in Keswick",
                "h1": "Walks in Keswick", "body": "<p>…</p>",
                "target_query": "walks in keswick", "template": "walks" } ] }`}</pre>
-              <p className="text-muted">The response has <span className="mono">verdict</span>, <span className="mono">confidence</span>, <span className="mono">reasons</span>, <span className="mono">fixes</span> and the code checks for each page, plus the template report. Up to 500 pages per request. For now the API uses your signed-in session; API keys for CMS webhooks (WordPress, Webflow) are coming.</p>
+              <p className="text-muted">The response has <span className="mono">verdict</span>, <span className="mono">confidence</span>, <span className="mono">reasons</span>, <span className="mono">fixes</span> and the code checks for each page, plus the template report. Up to 500 pages per request, 60 requests a minute per key. Errors are JSON with a stable <span className="mono">code</span>. <span className="mono">POST /api/sites/{id}/gate/check</span> takes the same body with a key or your signed-in session. For WordPress and Webflow, see Integrations below.</p>
             </div>
           )}
         </div>
@@ -181,6 +184,8 @@ Content-Type: application/json
           </table>
         )}
       </Section>
+
+      <Integrations siteId={id} sp={sp} />
     </div>
   );
 }

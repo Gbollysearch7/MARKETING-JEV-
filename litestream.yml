@@ -1,0 +1,26 @@
+# Litestream 0.5: continuous replication of the Rankcall SQLite database to S3-compatible storage.
+# Values in ${...} come from the environment (see .env.example). scripts/start.sh restores from this
+# replica on first boot when /data/app.db is missing, then runs the app under `litestream replicate -exec`.
+#
+# AWS S3 London:  LITESTREAM_REGION=eu-west-2, LITESTREAM_ENDPOINT empty.
+# Cloudflare R2:  LITESTREAM_REGION=auto, LITESTREAM_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
+#                 (create the bucket with the EU jurisdiction to keep data in Europe).
+
+# Full snapshot every 24 hours, kept for 30 days; WAL changes in between give point-in-time restore.
+snapshot:
+  interval: 24h
+  retention: 720h
+
+dbs:
+  - path: /data/app.db
+    # The app sets journal_mode=WAL (src/lib/db.ts). Litestream manages checkpoints from here on.
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: ${LITESTREAM_PATH}
+      region: ${LITESTREAM_REGION}
+      endpoint: ${LITESTREAM_ENDPOINT}
+      access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+      # Ship changes every second: at most about a second of writes is lost if the machine dies.
+      sync-interval: 1s

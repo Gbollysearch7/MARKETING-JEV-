@@ -38,6 +38,7 @@ export function Sidebar({ site, counts, live, model, account }: {
         { href: `${base}/cannibalisation`, label: 'Cannibalisation', icon: 'overlap', count: counts.pairs },
         { href: `${base}/queue`, label: 'Work queue', icon: 'queue', count: counts.tasks },
         { href: `${base}/outcomes`, label: 'Outcomes', icon: 'outcomes' },
+        { href: `${base}/accuracy`, label: 'Accuracy', icon: 'gate' },
         { href: `${base}/report`, label: 'Monthly report', icon: 'report' },
         { href: `${base}/decisions`, label: 'Decision log', icon: 'log' },
       ],
