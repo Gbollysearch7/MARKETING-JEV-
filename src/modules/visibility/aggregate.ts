@@ -74,7 +74,8 @@ export function trend(answers: AnswerFacts[], brand: string, competitors: string
 export interface EngineRow { engine: Engine; latest: Rates; previousVisibility: number | null }
 
 /** Per-engine rates at the latest run date each engine has, with the visibility at its run date before. */
-export function byEngine(answers: AnswerFacts[], brand: string, competitors: string[]): EngineRow[] {
+export function byEngine(all: AnswerFacts[], brand: string, competitors: string[], upTo?: string | null): EngineRow[] {
+  const answers = upTo ? all.filter((a) => a.runDate <= upTo) : all;
   const engines = [...new Set(answers.map((a) => a.engine))];
   return engines.map((engine) => {
     const mine = answers.filter((a) => a.engine === engine);
@@ -86,7 +87,7 @@ export function byEngine(answers: AnswerFacts[], brand: string, competitors: str
       latest: rates(mine.filter((a) => a.runDate === last), brand, competitors),
       previousVisibility: prev ? groupRate(mine.filter((a) => a.runDate === prev), (a) => a.mentioned) : null,
     };
-  }).sort((a, b) => (b.latest.visibility ?? -1) - (a.latest.visibility ?? -1));
+  }).sort((a, b) => Number(a.engine === 'other') - Number(b.engine === 'other') || (b.latest.visibility ?? -1) - (a.latest.visibility ?? -1));
 }
 
 export interface ChangeAlert { from: string; to: string; before: number; after: number; points: number }
@@ -121,9 +122,9 @@ export interface LostPrompt {
  * Prompts the brand loses at the latest run date: on an engine, the brand is mentioned in fewer than
  * half of that prompt's runs. One entry per prompt, listing every engine it lost on.
  */
-export function lostPrompts(answers: AnswerFacts[]): LostPrompt[] {
+export function lostPrompts(answers: AnswerFacts[], at?: string | null): LostPrompt[] {
   const dates = runDates(answers);
-  const last = dates[dates.length - 1];
+  const last = at ?? dates[dates.length - 1];
   if (!last) return [];
   const latest = answers.filter((a) => a.runDate === last);
   const byPrompt = new Map<string, AnswerFacts[]>();
@@ -160,4 +161,84 @@ export function visibilityAfter(answers: AnswerFacts[], promptId: string, doneAt
   if (!date) return null;
   const v = groupRate(mine.filter((a) => a.runDate === date), (a) => a.mentioned);
   return v == null ? null : { date, visibility: v };
+}
+
+// ---------- weekly periods ----------
+
+/**
+ * Answers are captured by hand over several days, so the overview reports by week (Monday start), not by
+ * the exact capture date. A single answer pasted today must never become "the latest run" on its own.
+ */
+export function weekStart(date: string): string {
+  const t = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(t)) return date.slice(0, 10);
+  const d = new Date(t);
+  const dow = (d.getUTCDay() + 6) % 7; // Monday = 0
+  return new Date(t - dow * 86_400_000).toISOString().slice(0, 10);
+}
+
+export const addDays = (date: string, days: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+/** The same facts with each run date replaced by the Monday of its week. */
+export function weekly(answers: AnswerFacts[]): AnswerFacts[] {
+  return answers.map((a) => ({ ...a, runDate: weekStart(a.runDate) }));
+}
+
+const pairKey = (a: AnswerFacts) => `${a.promptId}|${a.engine}`;
+export function pairsIn(answers: AnswerFacts[], period: string): Set<string> {
+  return new Set(answers.filter((a) => a.runDate === period).map(pairKey));
+}
+
+export interface PeriodView {
+  /** Facts keyed by week. */
+  facts: AnswerFacts[];
+  periods: string[];
+  /** The week the headline numbers describe: the latest week, unless it is still being captured. */
+  reporting: string | null;
+  previous: string | null;
+  /** The latest week when it has under half the prompt and engine pairs of the week before. */
+  inProgress: { period: string; pairs: number; expected: number } | null;
+}
+
+export function periodView(raw: AnswerFacts[]): PeriodView {
+  const facts = weekly(raw);
+  const periods = runDates(facts);
+  let reporting = periods[periods.length - 1] ?? null;
+  let previous = periods[periods.length - 2] ?? null;
+  let inProgress: PeriodView['inProgress'] = null;
+  if (reporting && previous) {
+    const now = pairsIn(facts, reporting).size;
+    const before = pairsIn(facts, previous).size;
+    if (now < before * 0.5) {
+      inProgress = { period: reporting, pairs: now, expected: before };
+      reporting = previous;
+      previous = periods[periods.length - 3] ?? null;
+    }
+  }
+  return { facts, periods, reporting, previous, inProgress };
+}
+
+/**
+ * Visibility in two periods over only the prompt and engine pairs captured in both, so adding or skipping
+ * prompts never shows up as a rise or fall.
+ */
+export function matchedChange(facts: AnswerFacts[], from: string, to: string): { before: number; after: number; pairs: number } | null {
+  const a = pairsIn(facts, from);
+  const both = new Set([...pairsIn(facts, to)].filter((k) => a.has(k)));
+  if (!both.size) return null;
+  const sel = (p: string) => facts.filter((f) => f.runDate === p && both.has(pairKey(f)));
+  const before = groupRate(sel(from), (x) => x.mentioned);
+  const after = groupRate(sel(to), (x) => x.mentioned);
+  return before == null || after == null ? null : { before, after, pairs: both.size };
+}
+
+export interface PeriodAlert extends ChangeAlert { pairs: number }
+
+/** Visibility moved more than `threshold` points between two weeks, on the pairs captured in both. */
+export function periodAlert(facts: AnswerFacts[], from: string | null, to: string | null, threshold = 10): PeriodAlert | null {
+  if (!from || !to) return null;
+  const m = matchedChange(facts, from, to);
+  if (!m) return null;
+  const points = Math.round((m.after - m.before) * 1000) / 10;
+  return Math.abs(points) > threshold ? { from, to, before: m.before, after: m.after, points, pairs: m.pairs } : null;
 }

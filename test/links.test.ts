@@ -165,3 +165,28 @@ describe('links: verify and disavow', () => {
     expect(t.split('\n').filter((l) => l.startsWith('domain:'))).toEqual(['domain:b.example', 'domain:spam.example']);
   });
 });
+
+describe('QA round 2: upload cap', () => {
+  it('can parse past the per-upload cap so the importer can add the next batch on a re-upload', () => {
+    const rows = Array.from({ length: 30 }, (_x, i) => `https://blog${i}.example/post`).join('\n');
+    const capped = parseProspects(`url\n${rows}`, 'prospects', 10);
+    expect(capped.rows).toHaveLength(10);
+    expect(capped.overCap).toBe(20);
+    expect(parseProspects(`url\n${rows}`, 'prospects', 50_000).rows).toHaveLength(30);
+  });
+  it('uses singular wording for one skipped row', () => {
+    expect(parseProspects('url\nnot a url\nhttps://a.example/x').notes[0]).toBe('1 row had no usable URL and was skipped.');
+  });
+});
+
+describe('auto-score threshold', () => {
+  it('auto-scores small imports only', async () => {
+    const { AUTO_SCORE_LIMIT, shouldAutoScore } = await import('../src/modules/links/types');
+    expect(AUTO_SCORE_LIMIT).toBe(200);
+    expect(shouldAutoScore(0)).toBe(false);
+    expect(shouldAutoScore(60)).toBe(true);
+    expect(shouldAutoScore(200)).toBe(true);
+    expect(shouldAutoScore(201)).toBe(false);
+    expect(shouldAutoScore(2000)).toBe(false);
+  });
+});

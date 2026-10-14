@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MockProvider } from '../src/engine/jev/client';
 import { analyseAnswer, classifySource, extractUrls, highlightSpans, normDate, normDomain, normEngine, parseAnswersCsv, positionOf, segment, termRegex } from '../src/modules/visibility/parse';
-import { changeAlert, groupRate, lostPrompts, rates, trend, visibilityAfter, type AnswerFacts } from '../src/modules/visibility/aggregate';
+import { changeAlert, groupRate, lostPrompts, matchedChange, periodAlert, periodView, rates, trend, visibilityAfter, weekly, weekStart, type AnswerFacts } from '../src/modules/visibility/aggregate';
 import { CRITERIA_VERSION, lossQuestions, lossState, sentimentQuestions, sentimentState } from '../src/modules/visibility/battery';
 import { fixFor, readLoss, readSentiment, routerFor } from '../src/modules/visibility/rules';
 import { mockVisibilityAnswer } from '../src/modules/visibility/mock';
@@ -218,5 +218,38 @@ describe('live runners (stubbed fetch; no provider keys in this environment)', (
     const { f } = stub({}, [401]);
     await expect(runOpenAI('q', { apiKey: 'secret-key', fetchImpl: f })).rejects.toThrow(/HTTP 401/);
     await expect(runOpenAI('q', { apiKey: 'secret-key', fetchImpl: f })).rejects.not.toThrow(/secret-key/);
+  });
+});
+
+describe('weekly periods (QA round 2)', () => {
+  const f = (promptId: string, engine: 'chatgpt' | 'claude', runDate: string, mentioned: boolean): AnswerFacts => ({ promptId, prompt: promptId, engine, runDate, mentioned, brandCited: false, competitors: [], sourceTypes: [] });
+  it('maps dates to the Monday of their week', () => {
+    expect(weekStart('2026-10-14')).toBe('2026-10-12');
+    expect(weekStart('2026-10-12')).toBe('2026-10-12');
+    expect(weekStart('2026-10-18')).toBe('2026-10-12');
+  });
+  it('keeps the previous week as the headline while this week is barely captured', () => {
+    const facts = [
+      ...['a', 'b', 'c', 'd'].flatMap((p) => [f(p, 'chatgpt', '2026-10-05', true), f(p, 'claude', '2026-10-06', false)]),
+      f('a', 'chatgpt', '2026-10-14', false),
+    ];
+    const pv = periodView(facts);
+    expect(pv.reporting).toBe('2026-10-05');
+    expect(pv.inProgress).toEqual({ period: '2026-10-12', pairs: 1, expected: 8 });
+  });
+  it('compares weeks only on prompt and engine pairs captured in both', () => {
+    const facts = weekly([f('a', 'chatgpt', '2026-10-05', true), f('b', 'chatgpt', '2026-10-05', false), f('a', 'chatgpt', '2026-10-12', true), f('c', 'chatgpt', '2026-10-12', false)]);
+    expect(matchedChange(facts, '2026-10-05', '2026-10-12')).toEqual({ before: 1, after: 1, pairs: 1 });
+    expect(periodAlert(facts, '2026-10-05', '2026-10-12')).toBeNull();
+  });
+});
+
+describe('auto-analyse threshold', () => {
+  it('never starts more than 200 Jev decisions on its own', async () => {
+    const { shouldAutoAnalyse } = await import('../src/modules/visibility/types');
+    expect(shouldAutoAnalyse(0)).toBe(false);
+    expect(shouldAutoAnalyse(45)).toBe(true);
+    expect(shouldAutoAnalyse(200)).toBe(true);
+    expect(shouldAutoAnalyse(420)).toBe(false);
   });
 });

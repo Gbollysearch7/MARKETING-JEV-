@@ -95,4 +95,7 @@ export interface BriefContent {
   linksTo: LinkSuggestion[];
   linksFrom: LinkSuggestion[];
   sources: string[];
+  /** For expand_existing: the page to add to (absent on briefs built before this field existed). */
+  expandPath?: string | null;
+  expandTitle?: string | null;
 }

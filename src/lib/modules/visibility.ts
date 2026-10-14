@@ -7,12 +7,13 @@ import { getProvider } from '@/lib/provider';
 import { listUrls, siteInputs, type Site } from '@/lib/repo';
 import { mapLimit, runningJobOf, startModuleJob, type JobContext } from '@/lib/modjobs';
 import { analyseAnswer, brandTerms, highlightSpans, mentionExcerpt, normDomain, parseAnswersCsv, type ImportedAnswer } from '@/modules/visibility/parse';
-import { byEngine, changeAlert, lostPrompts, rates, runDates, trend, visibilityAfter, type AnswerFacts } from '@/modules/visibility/aggregate';
+import { addDays, byEngine, lostPrompts, periodAlert, periodView, rates, runDates, trend, visibilityAfter, weekly, type AnswerFacts } from '@/modules/visibility/aggregate';
 import { CRITERIA_VERSION, lossQuestions, lossState, sentimentQuestions, sentimentState, type PageStatus } from '@/modules/visibility/battery';
 import { fixFor, readLoss, readSentiment, routerFor } from '@/modules/visibility/rules';
 import { mockVisibilityAnswer } from '@/modules/visibility/mock';
 import { coverageFor, suggestPrompts, type Suggestion } from '@/modules/visibility/prompts';
 import { LIVE_ENGINES, RUNNERS, RUNS_PER_PROMPT, runEngine, type LiveEngine } from '@/modules/visibility/runners';
+import { AUTO_ANALYSE_LIMIT, shouldAutoAnalyse } from '@/modules/visibility/types';
 import type { BrandConfig, CitedUrl, Engine, LossReason, LossStatus, Owner, Position, Router, Sentiment, SourceType, Span } from '@/modules/visibility/types';
 
 /** Module 4 data and jobs. Tables are prefixed visibility_ and created on first use. */
@@ -177,7 +178,7 @@ const toRow = (r: AnswerDb & { prompt: string }): AnswerRow => ({
 });
 
 /** Store captured answers. Exact duplicates (same prompt, engine, date and text) are skipped. */
-export function importAnswers(site: Site, rows: ImportedAnswer[], source: 'upload' | 'sample' | 'live', model: string | null = null): { added: number; duplicates: number; prompts: number } {
+export function importAnswers(site: Site, rows: ImportedAnswer[], source: 'upload' | 'sample' | 'live' | 'manual', model: string | null = null): { added: number; duplicates: number; prompts: number } {
   ensureSchema();
   const cfg = getSettings(site);
   const ids = upsertPrompts(site.id, rows.map((r) => ({ text: r.prompt, grp: null })));
@@ -242,7 +243,7 @@ export function answerFacts(siteId: string): AnswerFacts[] {
   }));
 }
 
-export interface AnswerFilter { engine?: string; date?: string; mentioned?: string; prompt?: string }
+export interface AnswerFilter { engine?: string; date?: string; week?: string; mentioned?: string; prompt?: string }
 
 export function listAnswers(siteId: string, f: AnswerFilter, limit: number, offset: number): { rows: AnswerRow[]; total: number } {
   ensureSchema();
@@ -250,6 +251,7 @@ export function listAnswers(siteId: string, f: AnswerFilter, limit: number, offs
   const args: unknown[] = [siteId];
   if (f.engine) { where.push('a.engine = ?'); args.push(f.engine); }
   if (f.date) { where.push('a.run_date = ?'); args.push(f.date); }
+  if (f.week && /^\d{4}-\d{2}-\d{2}$/.test(f.week)) { where.push('a.run_date between ? and ?'); args.push(f.week, addDays(f.week, 6)); }
   if (f.mentioned === 'yes') where.push('a.mentioned = 1');
   if (f.mentioned === 'no') where.push('a.mentioned = 0');
   if (f.prompt) { where.push('a.prompt_id = ?'); args.push(f.prompt); }
@@ -258,6 +260,33 @@ export function listAnswers(siteId: string, f: AnswerFilter, limit: number, offs
   const rows = db().prepare(`select a.*, p.text prompt from visibility_answers a join visibility_prompts p on p.id = a.prompt_id where ${w}
     order by a.run_date desc, p.text, a.engine, a.run_index limit ? offset ?`).all(...args, limit, offset) as (AnswerDb & { prompt: string })[];
   return { rows: rows.map(toRow), total };
+}
+
+// ---------- quick capture ----------
+
+/** Today in the UK, as YYYY-MM-DD (answers are dated by the founder's calendar, not UTC). */
+export const ukToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+
+/** For each prompt, the engines already captured in the week of `date`. */
+export function capturedThisWeek(siteId: string, date: string): Map<string, Set<Engine>> {
+  ensureSchema();
+  const from = weekly([{ promptId: '', prompt: '', engine: 'other', runDate: date, mentioned: false, brandCited: false, competitors: [], sourceTypes: [] }])[0].runDate;
+  const rows = db().prepare('select distinct prompt_id, engine from visibility_answers where site_id = ? and run_date between ? and ?').all(siteId, from, addDays(from, 6)) as { prompt_id: string; engine: Engine }[];
+  const out = new Map<string, Set<Engine>>();
+  for (const r of rows) { const s = out.get(r.prompt_id) ?? new Set<Engine>(); s.add(r.engine); out.set(r.prompt_id, s); }
+  return out;
+}
+
+export interface CaptureInput { engine: Engine; answer: string; urls: string }
+
+/** Store answers pasted by hand for one prompt. Returns the prompt id and what was stored. */
+export function captureAnswers(site: Site, promptText: string, date: string, items: CaptureInput[]) {
+  const rows: ImportedAnswer[] = items.filter((i) => i.answer.trim()).map((i) => ({
+    prompt: promptText, engine: i.engine, answer: i.answer.replace(/\r\n/g, '\n').trim().slice(0, 40_000), citedUrls: i.urls.trim() ? [i.urls] : [], runDate: date, runIndex: null,
+  }));
+  const res = importAnswers(site, rows, 'manual');
+  const promptId = upsertPrompts(site.id, [{ text: promptText }]).get(cleanPrompt(promptText).toLowerCase()) ?? null;
+  return { ...res, promptId };
 }
 
 // ---------- prompt detail ----------
@@ -277,7 +306,7 @@ export function promptDetail(site: Site, promptId: string): PromptDetail | null 
   const rows = db().prepare(`select a.*, p.text prompt from visibility_answers a join visibility_prompts p on p.id = a.prompt_id
     where a.prompt_id = ? order by a.run_date desc, a.engine, a.run_index`).all(promptId) as (AnswerDb & { prompt: string })[];
   const answers = rows.map((r) => ({ ...toRow(r), spans: highlightSpans(r.answer, cfg) }));
-  const facts = answerFacts(site.id).filter((f) => f.promptId === promptId);
+  const facts = weekly(answerFacts(site.id).filter((f) => f.promptId === promptId));
   const byDate = runDates(facts).map((date) => ({ date, visibility: rates(facts.filter((f) => f.runDate === date), cfg.name, []).visibility }));
   const loss = lossRows(site).find((l) => l.promptId === promptId) ?? null;
   return { prompt: { ...prompt, answers: rows.length }, answers, loss, byDate };
@@ -301,7 +330,8 @@ export function lossRows(site: Site, facts = answerFacts(site.id)): LossRow[] {
   ensureSchema();
   const stored = db().prepare('select * from visibility_losses where site_id = ?').all(site.id) as LossDb[];
   const byPrompt = new Map(stored.map((s) => [s.prompt_id, s]));
-  const live = lostPrompts(facts);
+  const pv = periodView(facts);
+  const live = lostPrompts(pv.facts, pv.reporting);
   const out: LossRow[] = live.map((l) => {
     const s = byPrompt.get(l.promptId);
     return {
@@ -341,23 +371,29 @@ export function setLossStatus(id: string, status: LossStatus) {
 export function dashboard(site: Site) {
   const cfg = getSettings(site);
   const facts = answerFacts(site.id);
-  const dates = runDates(facts);
-  const latestDate = dates[dates.length - 1] ?? null;
-  const prevDate = dates[dates.length - 2] ?? null;
+  const pv = periodView(facts);
+  const latestDate = pv.reporting;
+  const prevDate = pv.previous;
   const comps = cfg.competitors.map((c) => c.name);
-  const latest = rates(facts.filter((f) => f.runDate === latestDate), cfg.name, comps);
-  const previous = prevDate ? rates(facts.filter((f) => f.runDate === prevDate), cfg.name, comps) : null;
-  const sentiment = db().prepare(`select sentiment, count(*) n from visibility_answers where site_id = ? and run_date = ? and mentioned = 1 group by sentiment`).all(site.id, latestDate ?? '') as { sentiment: Sentiment | null; n: number }[];
+  const inWeek = (p: string | null) => pv.facts.filter((f) => f.runDate === p);
+  const latest = rates(inWeek(latestDate), cfg.name, comps);
+  const previous = prevDate ? rates(inWeek(prevDate), cfg.name, comps) : null;
+  const sentiment = latestDate ? db().prepare(`select sentiment, count(*) n from visibility_answers where site_id = ? and run_date between ? and ? and mentioned = 1 group by sentiment`).all(site.id, latestDate, addDays(latestDate, 6)) as { sentiment: Sentiment | null; n: number }[] : [];
   const sourceMix: Partial<Record<SourceType, number>> = {};
-  for (const f of facts) if (f.runDate === latestDate) for (const t of f.sourceTypes) sourceMix[t] = (sourceMix[t] ?? 0) + 1;
+  for (const f of inWeek(latestDate)) for (const t of f.sourceTypes) sourceMix[t] = (sourceMix[t] ?? 0) + 1;
+  const prompts = listPrompts(site.id);
   return {
-    cfg, facts, dates, latestDate, prevDate, latest, previous,
-    trend: trend(facts, cfg.name, comps),
-    engines: byEngine(facts, cfg.name, comps),
-    alert: changeAlert(facts),
+    cfg, facts, dates: pv.periods, latestDate, prevDate, latest, previous, inProgress: pv.inProgress,
+    trend: trend(pv.facts, cfg.name, comps),
+    engines: byEngine(pv.facts, cfg.name, comps, latestDate),
+    alert: periodAlert(pv.facts, prevDate, latestDate),
     losses: lossRows(site, facts),
     sentiment, sourceMix,
-    promptCount: listPrompts(site.id).length,
+    promptCount: prompts.length,
+    /** Without a crawl or Search Console pages, "no page covers this" cannot be told apart from "we do not know". */
+    pagesKnown: listUrls(site.id, { limit: 1, offset: 0, sort: 'path' }).rows.length > 0,
+    /** Tracked prompts with no answer at all yet, so the founder knows what is left to capture. */
+    uncaptured: prompts.filter((p) => p.answers === 0).length,
   };
 }
 
@@ -370,17 +406,15 @@ export function runningVisibilityJob(siteId: string) {
   return runningJobOf(siteId, ANALYSIS_JOB) ?? runningJobOf(siteId, RUN_JOB);
 }
 
-/** Jev pass: sentiment on every mentioning answer not scored yet, and a reason for every lost prompt whose evidence changed. */
-async function analyse(ctx: JobContext, site: Site): Promise<string> {
+/** The Jev work waiting: mentions without sentiment (newest first) and lost prompts whose evidence changed. */
+function planAnalysis(site: Site) {
   const cfg = getSettings(site);
   const d = db();
   const todo = d.prepare(`select a.id, a.answer, a.first_index, p.text prompt from visibility_answers a join visibility_prompts p on p.id = a.prompt_id
-    where a.site_id = ? and a.mentioned = 1 and a.sentiment is null`).all(site.id) as { id: string; answer: string; first_index: number | null; prompt: string }[];
-  const facts = answerFacts(site.id);
-  const dates = runDates(facts);
-  const latest = dates[dates.length - 1];
-  const overall = rates(facts.filter((f) => f.runDate === latest), cfg.name, []).visibility;
-  const lost = lostPrompts(facts);
+    where a.site_id = ? and a.mentioned = 1 and a.sentiment is null order by a.run_date desc, a.created_at desc`).all(site.id) as { id: string; answer: string; first_index: number | null; prompt: string }[];
+  const pv = periodView(answerFacts(site.id));
+  const overall = rates(pv.facts.filter((f) => f.runDate === pv.reporting), cfg.name, []).visibility;
+  const lost = lostPrompts(pv.facts, pv.reporting);
   const pages = listUrls(site.id, { limit: 20000, offset: 0, sort: 'path' }).rows;
   const pageByPath = new Map(pages.map((p) => [p.path, p]));
   const brandWords = [cfg.name, ...cfg.aliases];
@@ -389,11 +423,30 @@ async function analyse(ctx: JobContext, site: Site): Promise<string> {
     const coverage = coverageFor(l.prompt, pages, brandWords);
     const page = coverage.path ? pageByPath.get(coverage.path) : undefined;
     const pageStatus: PageStatus = !page ? 'unknown' : page.indexable === 0 || (page.status != null && page.status >= 400) ? 'not_indexable' : page.indexable === 1 || page.status === 200 ? 'indexable' : 'unknown';
-    const state = lossState({ brand: cfg.name, domain: cfg.domain, lost: l, coverage, pageStatus, overallVisibility: overall });
+    const state = lossState({ brand: cfg.name, domain: cfg.domain, lost: l, coverage, pageStatus, overallVisibility: overall, pagesKnown: pages.length > 0 });
     const hash = createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 16);
     return { l, coverage, state, hash };
   }).filter((j) => { const s = stored.get(j.l.promptId); return !(s && s.reason && s.evidence_hash === j.hash); });
+  return { cfg, todo, lossJobs, lost, stored };
+}
 
+/** How many Jev decisions the next analysis would make. */
+export function analysisWorkload(site: Site): { mentions: number; losses: number; total: number } {
+  ensureSchema();
+  const p = planAnalysis(site);
+  return { mentions: p.todo.length, losses: p.lossJobs.length, total: p.todo.length + p.lossJobs.length };
+}
+
+/**
+ * Jev pass: sentiment on mentioning answers not scored yet, and a reason for every lost prompt whose evidence
+ * changed. With `limit`, lost prompts are explained first and the rest of the budget goes to the newest mentions.
+ */
+async function analyse(ctx: JobContext, site: Site, limit?: number): Promise<string> {
+  const d = db();
+  const plan = planAnalysis(site);
+  const { cfg, lossJobs: allLoss, lost, stored } = plan;
+  const lossJobs = limit ? allLoss.slice(0, limit) : allLoss;
+  const todo = limit ? plan.todo.slice(0, Math.max(0, limit - lossJobs.length)) : plan.todo;
   const total = todo.length + lossJobs.length;
   let done = 0;
   ctx.progress(0, total, total ? `Scoring ${todo.length} mentions and ${lossJobs.length} lost prompts` : 'Nothing new to score');
@@ -428,13 +481,26 @@ async function analyse(ctx: JobContext, site: Site): Promise<string> {
   const lostIds = new Set(lost.map((l) => l.promptId));
   for (const [pid, s] of stored) if (!lostIds.has(pid) && s.status !== 'done') d.prepare('delete from visibility_losses where id = ?').run(s.id);
 
-  return `Scored sentiment on ${todo.length} mention${todo.length === 1 ? '' : 's'} and explained ${explained} lost prompt${explained === 1 ? '' : 's'}`;
+  const left = plan.todo.length - todo.length + allLoss.length - lossJobs.length;
+  return `Scored sentiment on ${todo.length} mention${todo.length === 1 ? '' : 's'} and explained ${explained} lost prompt${explained === 1 ? '' : 's'}${left ? `; ${left} left waiting` : ''}`;
 }
 
-export function startAnalysis(site: Site) {
+export function startAnalysis(site: Site, opts: { limit?: number } = {}) {
   const running = runningVisibilityJob(site.id);
   if (running) return running;
-  return startModuleJob(site.id, ANALYSIS_JOB, getProvider(mockVisibilityAnswer), (ctx) => analyse(ctx, site));
+  return startModuleJob(site.id, ANALYSIS_JOB, getProvider(mockVisibilityAnswer), (ctx) => analyse(ctx, site, opts.limit), opts.limit ? { limit: opts.limit } : {});
+}
+
+/**
+ * Start the Jev pass after new answers arrive, but only when it is small. A big backlog (e.g. a 700-answer
+ * import) waits for the founder to choose, so a live key never silently spends hundreds of decisions.
+ */
+export function autoAnalyse(site: Site): boolean {
+  if (runningVisibilityJob(site.id)) return false;
+  const w = analysisWorkload(site).total;
+  if (!shouldAutoAnalyse(w)) return false;
+  startAnalysis(site);
+  return true;
 }
 
 // ---------- live engines ----------
@@ -475,7 +541,7 @@ export function startLiveRun(site: Site) {
       }
     }, () => ctx.progress(++done, calls.length, `Asking ${engines.map((e) => RUNNERS[e.engine].provider.split(' ')[0]).join(', ')}`));
     if (!ok) throw new Error(`Every engine call failed. ${errors.join(' | ')}`.slice(0, 600));
-    const summary = await analyse(ctx, site);
+    const summary = await analyse(ctx, site, AUTO_ANALYSE_LIMIT);
     return `Captured ${ok} of ${calls.length} answers${errors.length ? ` (${calls.length - ok} failed: ${errors[0].slice(0, 120)})` : ''}. ${summary}`;
   }, { engines: engines.map((e) => e.engine), prompts: prompts.length });
 }

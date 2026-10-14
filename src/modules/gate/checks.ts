@@ -1,4 +1,4 @@
-import { findPlaceholders, jaccard, shingleList, words } from './text';
+import { jaccard, pagePlaceholders, shingleList, words } from './text';
 import type { CheckBands, CodeChecks, GatePageInput } from './types';
 
 /** Shingle size for template detection and duplication. */
@@ -122,9 +122,11 @@ export function computeChecks(pages: GatePageInput[], opts: CheckOptions = {}): 
     let dup = 0;
     let dupOf: string | null = null;
     let dupSource: 'batch' | 'site' | null = null;
+    let dupGroup = 0;
     prep.forEach((o, j) => {
       if (j === i) return;
       const r = jaccard(pr.set, o.set);
+      if (r > DUPLICATE_KILL) dupGroup++;
       if (r > dup) { dup = r; dupOf = pages[j].path; dupSource = 'batch'; }
     });
     for (const e of existing) {
@@ -143,7 +145,8 @@ export function computeChecks(pages: GatePageInput[], opts: CheckOptions = {}): 
       duplicateRatio: Math.round(dup * 1000) / 1000,
       duplicateOf: dupOf,
       duplicateSource: dupSource,
-      placeholders: findPlaceholders(p.title, p.h1, p.meta, p.body),
+      duplicateGroup: dupGroup,
+      placeholders: pagePlaceholders(p.title, p.h1, p.meta, p.body),
       duplicateTitleWith: p.title ? (titles.get(norm(p.title)) ?? 1) - 1 : 0,
       duplicateH1With: p.h1 ? (h1s.get(norm(p.h1)) ?? 1) - 1 : 0,
       missingTitle: !p.title.trim(),

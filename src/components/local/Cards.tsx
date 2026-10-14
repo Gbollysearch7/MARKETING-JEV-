@@ -1,11 +1,11 @@
 import { SubmitButton } from '@/components/SubmitButton';
-import { fmtDate, fmtDateTime, Prob, RouterBadge } from '@/components/ui';
+import { fmtDate, fmtDateTime, Prob } from '@/components/ui';
 import { decisionAction } from '@/lib/modules/local-actions';
 import type { PostRow, QuestionItem, ReviewItem } from '@/lib/modules/local';
 import { REMOVAL_STEPS } from '@/modules/local/replies';
 import { POST_LABEL, QA_LABEL, REVIEW_ACTION_LABEL, SENTIMENT_LABEL, THEME_LABEL, type PostType, type QaAction, type ReviewAction } from '@/modules/local/types';
 import { CopyButton } from './CopyButton';
-import { Stars, Tag, type Tone } from './bits';
+import { Stars, SureBadge, Tag, type Tone } from './bits';
 
 const ACTION_TONE: Record<ReviewAction, Tone> = { reply_template: 'ok', reply_custom: 'accent', escalate_to_manager: 'warn', flag_for_removal: 'bad' };
 const STATUS: Record<string, [string, Tone]> = {
@@ -47,7 +47,7 @@ export function ReviewCard({ item, back }: { item: ReviewItem; back: string }) {
           <Tag>{THEME_LABEL[d.data.theme]}</Tag>
           <Tag tone={d.data.sentimentScore < 1.5 ? 'bad' : d.data.sentimentScore < 2.5 ? 'warn' : 'ok'}>{SENTIMENT_LABEL[d.data.sentiment]}</Tag>
           <span className="inline-flex items-center gap-1.5 text-muted">confidence <Prob p={d.confidence} /></span>
-          <RouterBadge r={d.router} />
+          <SureBadge r={d.router} />
           {d.choice !== d.jev_choice && <span className="text-muted">(Jev chose {REVIEW_ACTION_LABEL[d.jev_choice as ReviewAction].toLowerCase()})</span>}
         </div>
       )}
@@ -122,7 +122,7 @@ export function QuestionCard({ item, back }: { item: QuestionItem; back: string 
           <Tag tone={d.choice === 'spam' ? 'bad' : d.choice === 'escalate' ? 'warn' : 'ok'}>{QA_LABEL[d.choice as QaAction]}</Tag>
           {d.choice === 'answer_from_profile' && <Tag>from {d.data.source}</Tag>}
           <span className="inline-flex items-center gap-1.5 text-muted">confidence <Prob p={d.confidence} /></span>
-          <RouterBadge r={d.router} />
+          <SureBadge r={d.router} />
         </div>
       )}
       {d?.data.rules.map((x) => <p key={x} className="mt-1 text-[12.5px] text-muted">· {x}</p>)}
@@ -161,7 +161,7 @@ export function PostCard({ post, back, daysSincePost }: { post: PostRow | null; 
         <span className="text-muted">Jev:</span>
         <Tag tone={post.choice === 'none_this_week' ? 'leave' : 'accent'}>{POST_LABEL[post.choice as PostType]}</Tag>
         <span className="inline-flex items-center gap-1.5 text-muted">confidence <Prob p={post.confidence} /></span>
-        <RouterBadge r={post.router} />
+        <SureBadge r={post.router} />
         <StatusTag s={post.status} />
         <span className="text-muted">{last}</span>
       </div>

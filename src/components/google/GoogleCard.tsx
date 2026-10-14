@@ -38,14 +38,19 @@ export function GoogleCard({ siteId, domain }: { siteId: string; domain: string 
   );
 
   if (missing.length) {
+    // Not configured: a quiet one-line note, so it does not push the upload cards down.
     return (
-      <section id="google" aria-label="Google connection" className="card flex flex-col gap-3 p-5">
-        {head(<Pill tone="muted">Not set up on this server</Pill>, 'Sync Search Console and GA4 straight from Google, read-only, instead of exporting files.')}
-        <div className="rounded-xl bg-sunken px-4 py-3 text-[13px] text-ink-2">
+      <details id="google" aria-label="Google connection" className="card group px-5 py-3.5">
+        <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 text-[13px]">
+          <span className="font-semibold">Sync from Google instead of uploading</span>
+          <Pill tone="muted">Not set up on this server</Pill>
+          <span className="ml-auto text-muted underline group-open:hidden">How to switch it on</span>
+        </summary>
+        <div className="mt-3 rounded-xl bg-sunken px-4 py-3 text-[13px] text-ink-2">
           <p>Google connections switch on once the server has these environment variables: {missing.map((m, i) => <span key={m}>{i > 0 && ', '}<code className="mono text-[12.5px]">{m}</code></span>)}. Restart the app after setting them.</p>
-          <p className="mt-1.5 text-muted">Until then, uploads below work exactly as before.</p>
+          <p className="mt-1.5 text-muted">Until then, uploads work exactly as before.</p>
         </div>
-      </section>
+      </details>
     );
   }
 

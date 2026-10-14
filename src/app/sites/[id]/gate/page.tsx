@@ -101,9 +101,13 @@ export default async function Gate({ params, searchParams }: PageProps<'/sites/[
               <input type="hidden" name="siteId" value={id} />
               <label className="flex flex-col gap-1.5">
                 <span className="label">Sitemap URL</span>
-                <input name="sitemap" type="url" className="input mono" placeholder={site.sitemap_url ?? `https://${site.domain}/sitemap.xml`} />
+                <input name="sitemap" type="url" className="input mono" defaultValue={site.sitemap_url ?? ''} placeholder={`https://${site.domain}/sitemap.xml`} />
               </label>
-              <p className="text-[12.5px] text-muted">Or leave the sitemap empty and list page URLs, one per line. Pages are fetched and their main text extracted; up to 500 pages per batch. The target query is taken from Search Console when the site has it.</p>
+              <label className="flex w-48 flex-col gap-1.5">
+                <span className="label">Pages from the sitemap</span>
+                <input name="limit" type="number" min={1} max={500} defaultValue={100} className="input num" />
+              </label>
+              <p className="text-[12.5px] text-muted">Or leave the sitemap empty and list page URLs, one per line. Pages are fetched (four at a time) and their main text extracted; up to 500 pages per batch. The target query is taken from Search Console when the site has it.</p>
               <label className="flex flex-col gap-1.5">
                 <span className="label">Page URLs</span>
                 <textarea name="urls" rows={5} className="input mono min-h-[120px] py-2 text-[12.5px]" placeholder={`https://${site.domain}/walks/keswick\nhttps://${site.domain}/walks/ambleside`} />

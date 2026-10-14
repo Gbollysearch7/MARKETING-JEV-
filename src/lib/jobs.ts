@@ -5,7 +5,7 @@ import { runVerdicts } from '@/engine/verdict/run';
 import { buildSiteData } from '@/engine/site';
 import { db, newId, now } from './db';
 import { getProvider } from './provider';
-import { createJob, getVerdict, saveUpload, setVerdictReview, siteInputs, updateJob, type Job } from './repo';
+import { carryReviews, createJob, getVerdict, latestVerdictJob, saveUpload, setVerdictReview, siteInputs, updateJob, type Job } from './repo';
 import { taskFromVerdict } from './tasks';
 
 /** Score every URL on a site. Runs in the background; the UI polls the job row. */
@@ -21,6 +21,7 @@ export function startVerdictJob(siteId: string, urlLimit: number): Job {
     urls = [...urls].sort((a, b) => (b.gsc?.clicks ?? 0) - (a.gsc?.clicks ?? 0) || (b.gsc?.impressions ?? 0) - (a.gsc?.impressions ?? 0)).slice(0, urlLimit);
   }
   const provider = getProvider();
+  const previous = latestVerdictJob(siteId);
   const job = createJob(siteId, 'verdicts', { uploadIds: inputs.uploadIds, notes, urls: urls.length });
   updateJob(job.id, { total: urls.length, provider: provider.name, model: provider.model, message: `Scoring ${urls.length} URLs` });
 
@@ -62,13 +63,18 @@ export function startVerdictJob(siteId: string, urlLimit: number): Job {
         for (const p of res.pairs) insPair.run(job.id, siteId, p.a, p.b, p.primary, JSON.stringify(p.shared));
       })();
 
+      // Reviews from the previous run carry over when the model still proposes the same thing, so a weekly
+      // re-score only asks about what changed.
+      const carried = previous ? carryReviews(previous.id, job.id) : new Set<string>();
+      for (let i = autoIds.length - 1; i >= 0; i--) if (carried.has(autoIds[i])) autoIds.splice(i, 1);
+
       // Confidence at or above the auto threshold goes straight into the work queue (PRD section 5).
       for (const id of autoIds) {
         setVerdictReview(id, { status: 'approved', reviewed_by: 'auto' });
         const v = getVerdict(id);
-        if (v) taskFromVerdict(v);
+        if (v) taskFromVerdict(v, inputs);
       }
-      updateJob(job.id, { status: 'done', progress: urls.length, input_tokens: res.inputTokens, message: `Scored ${urls.length} URLs`, finished_at: now() });
+      updateJob(job.id, { status: 'done', progress: urls.length, input_tokens: res.inputTokens, message: carried.size ? `Scored ${urls.length} URLs · ${carried.size} earlier reviews kept` : `Scored ${urls.length} URLs`, finished_at: now() });
     } catch (err) {
       updateJob(job.id, { status: 'failed', error: err instanceof Error ? err.message : String(err), finished_at: now() });
     }

@@ -14,7 +14,7 @@ import { buildQuestions, buildState, type SiteContext } from '@/modules/links/ba
 import { disavowFile } from '@/modules/links/disavow';
 import { featuresOf, siteTopics } from '@/modules/links/features';
 import { mockLinksAnswer } from '@/modules/links/mock';
-import { parseProspects, SOURCE_KIND_LABEL } from '@/modules/links/parse';
+import { MAX_PER_UPLOAD, parseProspects, SOURCE_KIND_LABEL } from '@/modules/links/parse';
 import { likelihoodOf, PRIOR_WEIGHT, PRIOR_WIN_RATE, type TypeStats } from '@/modules/links/rules';
 import { finish } from '@/modules/links/score';
 import { findLinksTo } from '@/modules/links/verify';
@@ -119,7 +119,8 @@ export interface ImportResult { added: number; duplicates: number; alreadyLinkin
 
 export function importProspects(siteId: string, input: Uint8Array | string, opts: { source: string; purpose: ImportPurpose; filename?: string }): ImportResult {
   ensureSchema();
-  const parsed = parseProspects(input, opts.purpose);
+  // Parse the whole file, then add at most MAX_PER_UPLOAD new pages, so uploading the same file again adds the next batch.
+  const parsed = parseProspects(input, opts.purpose, 50_000);
   if (!parsed.rows.length) throw new Error('No rows with a usable URL were found in that file.');
   const d = db();
   const t = now();
@@ -127,6 +128,7 @@ export function importProspects(siteId: string, input: Uint8Array | string, opts
   let added = 0;
   let duplicates = 0;
   let linking = 0;
+  let leftOut = 0;
   d.transaction(() => {
     if (opts.purpose === 'own_profile') {
       const insDom = d.prepare('insert or ignore into links_own_domains (site_id, domain, source, created_at) values (?, ?, ?, ?)');
@@ -141,11 +143,13 @@ export function importProspects(siteId: string, input: Uint8Array | string, opts
       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const r of parsed.rows) {
       if (exists.get(siteId, r.urlKey)) { duplicates++; continue; }
+      if (opts.purpose !== 'own_profile' && added >= MAX_PER_UPLOAD) { leftOut++; continue; }
       const al = opts.purpose === 'own_profile' || own.has(r.domain);
       if (al) linking++;
       ins.run(newId(), siteId, r.url, r.urlKey, r.domain, r.title, r.snippet, r.anchor, r.dr, r.traffic, r.linkAttr, source, parsed.kind, opts.purpose, al ? 1 : 0, t);
       added++;
     }
+    if (leftOut) parsed.notes.push(`${MAX_PER_UPLOAD.toLocaleString('en-GB')} new pages were added; ${leftOut.toLocaleString('en-GB')} more are in the file. Upload the same file again to add the next batch.`);
     d.prepare(`insert into links_imports (id, site_id, source, source_kind, purpose, filename, added, duplicates, already_linking, notes, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(newId(), siteId, source, parsed.kind, opts.purpose, opts.filename ?? null, added, duplicates, linking, JSON.stringify(parsed.notes), t);
   })();
@@ -188,14 +192,18 @@ export function unscoredCount(siteId: string): number {
   return (db().prepare('select count(*) n from links_prospects where site_id = ? and (scored_at is null or criteria_version is not ?)').get(siteId, LINKS_CRITERIA_VERSION) as { n: number }).n;
 }
 
-export function startLinksJob(site: Site): Job {
+/** Score unscored prospects. With `limit`, only that many, highest authority (then traffic) first. */
+export function startLinksJob(site: Site, opts: { limit?: number } = {}): Job {
   ensureSchema();
   const running = runningJobOf(site.id, JOB_TYPE);
   if (running) return running;
   const provider = getProvider(mockLinksAnswer);
+  const limit = opts.limit && opts.limit > 0 ? Math.floor(opts.limit) : null;
   return startModuleJob(site.id, JOB_TYPE, provider, async (ctx) => {
     const d = db();
-    const pending = () => d.prepare('select * from links_prospects where site_id = ? and (scored_at is null or criteria_version is not ?) order by created_at').all(site.id, LINKS_CRITERIA_VERSION) as Raw[];
+    const pending = () => (limit
+      ? d.prepare('select * from links_prospects where site_id = ? and (scored_at is null or criteria_version is not ?) order by dr desc nulls last, traffic desc nulls last, created_at limit ?').all(site.id, LINKS_CRITERIA_VERSION, limit)
+      : d.prepare('select * from links_prospects where site_id = ? and (scored_at is null or criteria_version is not ?) order by created_at').all(site.id, LINKS_CRITERIA_VERSION)) as Raw[];
     let todo = pending();
     if (!todo.length) return 'Nothing new to score';
     const sc = siteContext(site);
@@ -224,13 +232,13 @@ export function startLinksJob(site: Site): Job {
         }
       }, (done) => ctx.progress(done, todo.length, `Scored ${done} of ${todo.length} prospects`));
       scored += todo.length;
-      todo = pending().filter((r) => !tried.has(r.id));
+      todo = limit ? [] : pending().filter((r) => !tried.has(r.id));
     }
     recompute(site.id);
     const ok = scored - failed;
     if (!ok) throw new Error(`Every call failed (${failed}). Check the decision provider and try again.`);
     return `Scored ${ok} prospects${failed ? `; ${failed} failed and can be retried` : ''}`;
-  }, { count: unscoredCount(site.id) });
+  }, { count: limit ? Math.min(limit, unscoredCount(site.id)) : unscoredCount(site.id), limit });
 }
 
 // ---------- ledger and likelihood ----------
@@ -312,7 +320,7 @@ export function getProspect(id: string): Prospect | null {
 
 export function prospectEvents(id: string) {
   ensureSchema();
-  return db().prepare('select kind, value, by_name, at from links_events where prospect_id = ? order by id desc limit 20').all(id) as { kind: string; value: string | null; by_name: string | null; at: string }[];
+  return db().prepare('select kind, value, by_name, at from links_events where prospect_id = ? order by id desc limit 40').all(id) as { kind: string; value: string | null; by_name: string | null; at: string }[];
 }
 
 export function summary(siteId: string) {
@@ -365,6 +373,12 @@ export function latestLinksJob(siteId: string): Job | null {
 
 function event(siteId: string, prospectId: string, kind: string, value: string | null, by: string | null) {
   db().prepare('insert into links_events (site_id, prospect_id, kind, value, by_name, at) values (?, ?, ?, ?, ?, ?)').run(siteId, prospectId, kind, value, by, now());
+}
+
+/** A free-text note on a prospect (who was emailed, what they said, follow-up date). Kept in the history. */
+export function addNote(p: Prospect, text: string, by: string) {
+  ensureSchema();
+  event(p.site_id, p.id, 'note', text.slice(0, 2000), by);
 }
 
 export function claimProspect(p: Prospect, owner: string | null, by: string) {

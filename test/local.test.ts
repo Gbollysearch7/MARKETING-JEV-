@@ -6,7 +6,7 @@ import { computeHealth, postRecencyBand, reviewPeriods, seasonOf } from '../src/
 import { mockLocalAnswer } from '../src/modules/local/mock';
 import { citationIssues, compareCitation, directoryRank, normAddress, normPhone, normPostcode, sameAddress } from '../src/modules/local/nap';
 import { parseCitations, parseDate, parseLocations, parseQuestions, parseRating, parseReviews } from '../src/modules/local/parse';
-import { draftReply, greeting, hasPlaceholder } from '../src/modules/local/replies';
+import { draftAnswer, draftReply, greeting, hasPlaceholder } from '../src/modules/local/replies';
 import { attentionPriority, reviewDecision } from '../src/modules/local/rules';
 import { analyseLocation, isoWeek, runLocal } from '../src/modules/local/run';
 import { DEFAULT_SETTINGS, type LocalLocation } from '../src/modules/local/types';
@@ -194,5 +194,25 @@ describe('weekly run with the mock', () => {
     const s = buildReviewState({ locId: 'A', key: 'k', author: 'Jo', rating: 4, text: '', date: '2026-10-12', replied: false, replyText: '' }, { name: 'Shop', primaryCategory: 'Outdoor sports store' }, TODAY);
     expect(s.review).toEqual({ stars: '4_of_5', text: '(no text, star rating only)', age: 'last_2_days' });
     expect(Object.keys(buildReviewQuestions())).toEqual(['action', 'theme', 'sentiment', 'breaks_rules']);
+  });
+});
+
+describe('QA round 2: messy uploads and reply wording', () => {
+  it('matches location ids across files ignoring case and spaces, and merges duplicate rows', () => {
+    const locs = parseLocations('Store code,Business name,Address line 1,Locality\n so-kes ,Shop Keswick,1 Lake Road,Keswick\nSO-KES,Shop Keswick,1 Lake Road,Keswick\n');
+    expect(locs.rows).toHaveLength(1);
+    expect(locs.rows[0].locId).toBe('SO-KES');
+    expect(locs.rows[0].address).toBe('1 Lake Road, Keswick');
+    expect(locs.warnings[0]).toMatch(/more than once/);
+    const revs = parseReviews('Store code,Reviewer,Star rating,Review comment,Create time\nSo-Kes,Anon,FIVE,,12/10/2026\n');
+    expect(revs.rows[0].locId).toBe('SO-KES');
+  });
+  it('greets anonymous reviewers plainly', () => {
+    expect(greeting('Anon')).toBe('Hello,');
+    expect(greeting('Siobhán Ó Briain')).toBe('Hi Siobhán,');
+  });
+  it('lists categories in plain British English', () => {
+    const loc = { primaryCategory: 'Outdoor sports store', additionalCategories: ['Camping store', 'Climbing equipment store'], phone: '', name: 'Shop', hours: '', address: '', postcode: '', website: '', description: '' } as unknown as LocalLocation;
+    expect(draftAnswer('categories', loc)).toContain("We're an outdoor sports store, and we're also a camping store and a climbing equipment store.");
   });
 });

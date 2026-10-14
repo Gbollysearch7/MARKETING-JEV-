@@ -1,5 +1,5 @@
-import { unzipSync, strFromU8 } from 'fflate';
-import { findCol, num, numOr0, parseTable, type Row } from './csv';
+import { unzipSync } from 'fflate';
+import { decodeText, findCol, num, numOr0, parseTable, type Row } from './csv';
 import { pathKey } from './url';
 
 export interface GscPage {
@@ -39,15 +39,19 @@ export function importGsc(fileName: string, bytes: Uint8Array): GscImport {
   if (fileName.toLowerCase().endsWith('.zip') || (bytes[0] === 0x50 && bytes[1] === 0x4b)) {
     return importGscZip(bytes);
   }
-  return importGscCsv(strFromU8(bytes));
+  return importGscCsv(decodeText(bytes));
 }
 
 function importGscZip(bytes: Uint8Array): GscImport {
-  const files = unzipSync(bytes);
+  let files: Record<string, Uint8Array>;
+  try { files = unzipSync(bytes); } catch { throw new Error('This zip file could not be opened. Download the export again and upload it without changing it.'); }
   const byName = new Map<string, string>();
   for (const [name, data] of Object.entries(files)) {
-    byName.set(name.split('/').pop()!.toLowerCase(), strFromU8(data));
+    const base = name.split('/').pop()!.toLowerCase();
+    if (base.endsWith('.csv')) byName.set(base, decodeText(data));
+    else if (base === '[content_types].xml') byName.set(base, '');
   }
+  if (byName.has('[content_types].xml')) throw new Error('This is an Excel file. In Search Console choose Export > Download CSV, or save the sheet as CSV first.');
   const pagesCsv = byName.get('pages.csv');
   if (!pagesCsv) {
     throw new Error('This zip has no Pages.csv. Export from Search Console > Performance > Export > Download CSV.');
@@ -116,7 +120,7 @@ function importPages(headers: string[], rows: Row[], pageCol: string): GscImport
   for (const pg of pages) if (!pg.ctr && pg.impressions) pg.ctr = pg.clicks / pg.impressions;
   const notes: string[] = [];
   if (!hasPrevious) notes.push('No previous period found. Export with Compare turned on to detect decaying pages.');
-  if (rows.length >= 1000) notes.push('This export has 1,000 rows, the Search Console website limit. Pages beyond that are missing.');
+  if (rows.length === 1000) notes.push('This export has 1,000 rows, the Search Console website limit. Pages beyond that are missing.');
   return { period: null, hasPrevious, pages, pageQueries: [], notes };
 }
 

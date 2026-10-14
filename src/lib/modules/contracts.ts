@@ -30,3 +30,12 @@ export interface KeywordCluster {
   /** Other pages that also claim this cluster (cannibalisation). */
   alsoClaimedBy: string[];
 }
+
+/**
+ * Jobs running in this server process. A job row still marked "running" that is not in this set was cut off by a
+ * restart (jobs run in memory), so the module marks it failed instead of blocking new runs forever.
+ */
+const LIVE_KEY = '__rankcallContentJobs';
+const g = globalThis as unknown as Record<string, Set<string> | undefined>;
+export const liveJobs: Set<string> = (g[LIVE_KEY] ??= new Set<string>());
+export const INTERRUPTED = 'Interrupted by a server restart. Run it again.';

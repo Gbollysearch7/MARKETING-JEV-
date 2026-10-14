@@ -2,6 +2,38 @@ import Papa from 'papaparse';
 
 export type Row = Record<string, string>;
 
+/**
+ * Bytes to text for any export: UTF-8 (with or without BOM), or UTF-16 LE/BE, which Excel ("Unicode text"),
+ * Ahrefs and some GA4 downloads produce. UTF-16 without a BOM is detected from its zero bytes.
+ * Binary files (images, spreadsheets) fail here with a clear message instead of a confusing header error.
+ */
+export function decodeText(bytes: Uint8Array): string {
+  const b = bytes;
+  let text: string;
+  if (b[0] === 0xff && b[1] === 0xfe) text = new TextDecoder('utf-16le').decode(b.subarray(2));
+  else if (b[0] === 0xfe && b[1] === 0xff) text = new TextDecoder('utf-16be').decode(b.subarray(2));
+  else {
+    // Zero bytes in every other position of the first few hundred bytes means UTF-16 without a BOM.
+    const n = Math.min(b.length, 400);
+    let evenZero = 0, oddZero = 0;
+    for (let i = 0; i < n; i++) if (b[i] === 0) { if (i % 2) oddZero++; else evenZero++; }
+    if (n >= 8 && oddZero > n / 4 && evenZero === 0) text = new TextDecoder('utf-16le').decode(b);
+    else if (n >= 8 && evenZero > n / 4 && oddZero === 0) text = new TextDecoder('utf-16be').decode(b);
+    else text = new TextDecoder('utf-8').decode(b);
+  }
+  text = text.replace(/^\uFEFF/, '');
+  if (looksBinary(b)) throw new Error('This is not a CSV or text export. Upload the CSV, TSV or zip file the tool downloads (Excel .xlsx files need saving as CSV first).');
+  return text;
+}
+
+function looksBinary(b: Uint8Array): boolean {
+  if (b[0] === 0x50 && b[1] === 0x4b) return true; // zip or xlsx where text was expected
+  if (b[0] === 0x89 && b[1] === 0x50) return true; // png
+  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return true; // pdf
+  if (b[0] === 0xff && b[1] === 0xd8) return true; // jpeg
+  return false;
+}
+
 /** Lowercase, strip punctuation and collapse spaces so "Title 1", "title_1" and "Title-1" match. */
 export const normHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9%+]+/g, ' ').trim();
 
@@ -11,7 +43,7 @@ export const normHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9%+]+/g
  * picking the first row that contains one of the expected header names.
  */
 export function parseTable(text: string, expectAnyOf: string[]): { headers: string[]; rows: Row[] } {
-  const clean = text.replace(/^﻿/, '');
+  const clean = text.replace(/^\uFEFF/, '');
   const parsed = Papa.parse<string[]>(clean, { skipEmptyLines: 'greedy' });
   const grid = (parsed.data as string[][]).filter((r) => Array.isArray(r) && !(r.length === 1 && r[0].startsWith('#')));
   const wanted = expectAnyOf.map(normHeader);

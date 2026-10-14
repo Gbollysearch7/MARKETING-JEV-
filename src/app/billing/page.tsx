@@ -25,7 +25,7 @@ export default async function Billing({ searchParams }: PageProps<'/billing'>) {
             <span className="label">Current plan</span>
             <span className="text-[22px] font-bold">{st.label}</span>
             <span className="text-[13px] text-muted">
-              {st.onTrial ? (st.active ? `${st.trialDaysLeft} ${st.trialDaysLeft === 1 ? 'day' : 'days'} left · up to ${st.urlLimit.toLocaleString('en-GB')} URLs a site` : 'Trial ended. Choose a plan to keep scoring; your data stays.') : `Up to ${st.urlLimit.toLocaleString('en-GB')} URLs a site · ${viewer.account.subscription_status ?? 'no subscription'}`}
+              {st.billingOff ? `No time limit and up to ${st.urlLimit.toLocaleString('en-GB')} URLs a site while card payments are off.` : st.onTrial ? (st.active ? `${st.trialDaysLeft} ${st.trialDaysLeft === 1 ? 'day' : 'days'} left · up to ${st.urlLimit.toLocaleString('en-GB')} URLs a site` : 'Trial ended. Choose a plan to keep scoring; your data stays.') : `Up to ${st.urlLimit.toLocaleString('en-GB')} URLs a site · ${viewer.account.subscription_status ?? 'no subscription'}`}
             </span>
           </div>
           {viewer.account.stripe_customer_id && configured && (
@@ -33,7 +33,7 @@ export default async function Billing({ searchParams }: PageProps<'/billing'>) {
           )}
         </section>
         {!configured && (
-          <div className="rounded-xl bg-warn-bg px-4 py-3 text-[13.5px] text-warn">Card payments are not switched on yet. They start once the Stripe keys are added; until then every account runs on the free trial.</div>
+          <div className="rounded-xl bg-sunken px-4 py-3 text-[13.5px] text-ink-2">{st.billingOff ? 'Card payments are not switched on for this copy of Rankcall, so every feature is open with no time limit. The plans below take effect once the Stripe keys are added.' : 'Card payments are not switched on yet. They start once the Stripe keys are added; until then every account runs on the free trial.'}</div>
         )}
         <section className="grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-4">
           {PAID_PLANS.map((k) => {
@@ -48,7 +48,9 @@ export default async function Billing({ searchParams }: PageProps<'/billing'>) {
                 <ul className="flex list-disc flex-col gap-1 pl-5 text-[13.5px] text-ink-2">
                   <li>Every URL scored weekly</li><li>Decision inbox and work queue</li><li>Outcomes at 30, 60 and 90 days</li><li>Monthly PDF report</li>
                 </ul>
-                <button className={`btn mt-auto h-11 justify-center ${current ? '' : 'btn-primary'}`} disabled={!configured || current || viewer.user.role !== 'owner'}>{current ? 'Current plan' : `Choose ${plan.label}`}</button>
+                {configured
+                  ? <button className={`btn mt-auto h-11 justify-center ${current ? '' : 'btn-primary'}`} disabled={current || viewer.user.role !== 'owner'}>{current ? 'Current plan' : `Choose ${plan.label}`}</button>
+                  : <p className="mt-auto border-t border-line pt-3 text-[12.5px] text-muted">Available once card payments are switched on.</p>}
               </form>
             );
           })}

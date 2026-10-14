@@ -256,6 +256,43 @@ export function verdictForPath(jobId: string, path: string): VerdictRow | null {
   return r ? parseVerdict(r) : null;
 }
 
+/**
+ * Carry human reviews from one scoring run to the next. A review is kept when the model proposes the same verdict and
+ * target as before, or when it now proposes what the reviewer chose instead. Anything else returns to the inbox.
+ * Kept rows are marked reviewed_by 'carried' with the original review date, so reports and accuracy count each
+ * human review once. Returns the ids of the new rows that took a carried review.
+ */
+export function carryReviews(fromJobId: string, toJobId: string): Set<string> {
+  const d = db();
+  const rows = d.prepare(`select n.id, n.verdict nv, n.target nt, o.verdict ov, o.target ot, o.status, o.final_verdict, o.final_target, o.reviewed_at
+    from verdicts n join verdicts o on o.job_id = ? and o.path = n.path
+    where n.job_id = ? and n.skipped is null and n.verdict is not null and o.status != 'proposed' and o.reviewed_by in ('user', 'carried')`)
+    .all(fromJobId, toJobId) as { id: string; nv: string; nt: string | null; ov: string; ot: string | null; status: string; final_verdict: string | null; final_target: string | null; reviewed_at: string | null }[];
+  const upd = d.prepare(`update verdicts set status = ?, final_verdict = ?, final_target = ?, reviewed_by = 'carried', reviewed_at = ? where id = ?`);
+  const kept = new Set<string>();
+  d.transaction(() => {
+    for (const r of rows) {
+      const same = r.nv === r.ov && (r.nt ?? null) === (r.ot ?? null);
+      const chosen = r.final_verdict ?? r.ov;
+      const chosenTarget = r.final_verdict ? r.final_target : (r.final_target ?? r.ot);
+      const nowAgrees = r.status === 'approved' && r.nv === chosen && (r.nt ?? null) === (chosenTarget ?? null);
+      if (same) {
+        upd.run(r.status, r.final_verdict, r.final_target, r.reviewed_at, r.id);
+        kept.add(r.id);
+      } else if (nowAgrees) {
+        upd.run('approved', null, chosenTarget ?? null, r.reviewed_at, r.id);
+        kept.add(r.id);
+      }
+    }
+  })();
+  return kept;
+}
+
+/** Undo a review: back to proposed. */
+export function reopenVerdict(id: string) {
+  db().prepare(`update verdicts set status = 'proposed', final_verdict = null, final_target = null, reviewed_by = null, reviewed_at = null where id = ?`).run(id);
+}
+
 export function setVerdictReview(id: string, patch: { status: VerdictRow['status']; final_verdict?: Verdict | null; final_target?: string | null; reviewed_by: 'auto' | 'user' }) {
   db().prepare(`update verdicts set status = @status, final_verdict = @final_verdict, final_target = @final_target, reviewed_by = @reviewed_by, reviewed_at = @reviewed_at where id = @id`)
     .run({ final_verdict: null, final_target: null, ...patch, id, reviewed_at: now() });
@@ -355,18 +392,34 @@ export function runHistory(siteId: string, limit = 8): { id: string; at: string;
   });
 }
 
-/** Site-wide organic clicks a month for each Search Console upload with a known period, oldest period first. */
+/** Uploads never change once stored, so their click totals are computed once per server process. */
+const totalsCache = new Map<string, { clicks: number; prev: number | null }>();
+function uploadClickTotals(id: string) {
+  let t = totalsCache.get(id);
+  if (!t) {
+    const g = uploadData<GscImport>(id);
+    t = { clicks: g.pages.reduce((s, p) => s + p.clicks, 0), prev: g.hasPrevious ? g.pages.reduce((s, p) => s + (p.prevClicks ?? 0), 0) : null };
+    totalsCache.set(id, t);
+  }
+  return t;
+}
+
+/**
+ * Site-wide organic clicks a month for each Search Console upload with a known period, oldest period first.
+ * Page and query files leave out anonymised searches and often cover only part of the site, so they are used only
+ * when no pages export with a date range exists; mixing the two would draw a false drop.
+ */
 export function clicksHistory(siteId: string): { start: string; end: string; clicksMonth: number; prevClicksMonth: number | null }[] {
-  const ups = listUploads(siteId).filter((u) => (u.kind === 'gsc_pages' || u.kind === 'gsc_queries') && u.period_start && u.period_end);
+  const all = listUploads(siteId).filter((u) => (u.kind === 'gsc_pages' || u.kind === 'gsc_queries') && u.period_start && u.period_end);
+  const pagesOnly = all.filter((u) => u.kind === 'gsc_pages');
+  const ups = pagesOnly.length ? pagesOnly : all;
   const byPeriod = new Map<string, { start: string; end: string; clicksMonth: number; prevClicksMonth: number | null }>();
   for (const u of ups) {
     const key = `${u.period_start}|${u.period_end}`;
-    if (byPeriod.has(key) && u.kind === 'gsc_queries') continue; // prefer the pages export for totals
-    const g = uploadData<GscImport>(u.id);
+    if (byPeriod.has(key)) continue; // newest upload for a period wins (listUploads is newest first)
+    const t = uploadClickTotals(u.id);
     const days = Math.max(1, Math.round((Date.parse(u.period_end!) - Date.parse(u.period_start!)) / 86_400_000) + 1);
-    const clicks = g.pages.reduce((s, p) => s + p.clicks, 0);
-    const prev = g.hasPrevious ? g.pages.reduce((s, p) => s + (p.prevClicks ?? 0), 0) : null;
-    byPeriod.set(key, { start: u.period_start!, end: u.period_end!, clicksMonth: Math.round(clicks * 30 / days), prevClicksMonth: prev == null ? null : Math.round(prev * 30 / days) });
+    byPeriod.set(key, { start: u.period_start!, end: u.period_end!, clicksMonth: Math.round(t.clicks * 30 / days), prevClicksMonth: t.prev == null ? null : Math.round(t.prev * 30 / days) });
   }
   return [...byPeriod.values()].sort((a, b) => a.start.localeCompare(b.start));
 }

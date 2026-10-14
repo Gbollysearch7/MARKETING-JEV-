@@ -1,5 +1,4 @@
-import { strFromU8 } from 'fflate';
-import { findCol, numOr0, parseTable } from './csv';
+import { decodeText, findCol, numOr0, parseTable } from './csv';
 import { pathKey } from './url';
 
 export interface BacklinkPage { path: string; referringDomains: number; backlinks: number }
@@ -8,8 +7,7 @@ const URL_ALIASES = ['url', 'target url', 'page url', 'page', 'address'];
 
 /** Ahrefs "Best by links" or Semrush "Indexed pages" export. One row per URL on the site. */
 export function importBacklinks(bytes: Uint8Array): { pages: BacklinkPage[]; notes: string[] } {
-  // Ahrefs exports are UTF-16 tab separated; fflate decodes UTF-8, so detect and decode UTF-16 first.
-  const text = bytes[0] === 0xff && bytes[1] === 0xfe ? new TextDecoder('utf-16le').decode(bytes) : strFromU8(bytes);
+  const text = decodeText(bytes);
   const { headers, rows } = parseTable(text, URL_ALIASES);
   const urlCol = findCol(headers, URL_ALIASES)!;
   const rdCol = findCol(headers, ['referring domains', 'ref domains', 'domains', 'rd']);

@@ -28,7 +28,7 @@ export async function Integrations({ siteId, sp }: { siteId: string; sp: Record<
     <section id="integrations" className="card scroll-mt-24 overflow-hidden">
       <div className="border-b border-line px-4 py-4 sm:px-6">
         <h2 className="text-[15px] font-semibold">Integrations</h2>
-        <p className="text-[13px] text-muted">Send pages from your CMS or build as they are published. Results land in the batch list below.</p>
+        <p className="text-[13px] text-muted">Send pages from your CMS or build as they are published. Results land in the batch list above.</p>
       </div>
       <div className="grid gap-px bg-line md:grid-cols-3">
         <div className="flex flex-col gap-3 bg-surface px-4 py-5 sm:px-6">

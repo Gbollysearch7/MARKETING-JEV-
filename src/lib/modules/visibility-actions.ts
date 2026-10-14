@@ -5,7 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { requireSite } from '@/lib/auth';
 import { normDomain } from '@/modules/visibility/parse';
 import { LOSS_STATUSES, type LossStatus } from '@/modules/visibility/types';
+import { AUTO_ANALYSE_LIMIT, CAPTURE_ENGINES } from '@/modules/visibility/types';
 import {
+  autoAnalyse, captureAnswers, capturedThisWeek, listPrompts, ukToday,
   clearAnswers, deletePrompt, getLoss, getPrompt, importAnswersCsv, loadSampleData, saveSettings, setLossStatus,
   startAnalysis, startLiveRun, updatePrompt, upsertPrompts,
 } from './visibility';
@@ -78,21 +80,21 @@ export async function pasteAnswersAction(formData: FormData) {
   } catch (err) {
     redirect(`${base(s.id)}/answers?error=${enc(err instanceof Error ? err.message : 'Could not read that CSV.')}`);
   }
-  if (res.added && viewer.status.active) startAnalysis(s);
+  if (res.added && viewer.status.active) autoAnalyse(s);
   redirect(`${base(s.id)}/answers?done=imported&n=${res.added}&dup=${res.duplicates}${res.notes.length ? `&notes=${enc(res.notes.join(' '))}` : ''}`);
 }
 
 export async function loadSampleAction(formData: FormData) {
   const { site: s, viewer } = await site(formData);
   const res = loadSampleData(s);
-  if (res.added && viewer.status.active) startAnalysis(s);
+  if (res.added && viewer.status.active) autoAnalyse(s);
   redirect(`${base(s.id)}?done=sample&n=${res.added}`);
 }
 
 export async function analyseAction(formData: FormData) {
   const { site: s, viewer } = await site(formData);
   if (!viewer.status.active) redirect('/billing');
-  startAnalysis(s);
+  startAnalysis(s, str(formData.get('scope')) === 'top' ? { limit: AUTO_ANALYSE_LIMIT } : {});
   redirect(`${base(s.id)}${str(formData.get('back')) === 'answers' ? '/answers' : ''}`);
 }
 
@@ -119,4 +121,36 @@ export async function setLossStatusAction(lossId: string, status: string): Promi
   setLossStatus(lossId, status as LossStatus);
   revalidatePath(base(s.id), 'layout');
   return null;
+}
+
+
+/**
+ * Quick capture: answers pasted by hand for one prompt, one box per engine. Sends the founder straight on to
+ * the next prompt that still has nothing captured this week, keeping the date they chose.
+ */
+export async function captureAnswersAction(formData: FormData) {
+  const { site: s, viewer } = await site(formData);
+  const from = str(formData.get('from'));
+  const backTo = (q: string) => from && /^\/sites\/[^/]+\/visibility\/prompts\/[\w-]+$/.test(from) && from.startsWith(`${base(s.id)}/`) ? `${from}?${q}#capture` : `${base(s.id)}/answers?${q}#capture`;
+  const prompts = listPrompts(s.id);
+  const pid = str(formData.get('promptId'));
+  const typed = str(formData.get('newPrompt')).replace(/\s+/g, ' ').slice(0, 500);
+  const promptText = typed || prompts.find((p) => p.id === pid)?.text || '';
+  const today = ukToday();
+  const raw = str(formData.get('date'));
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) && raw <= today ? raw : today;
+  if (!promptText) redirect(backTo(`error=${enc('Choose a prompt or type a new one.')}&date=${date}`));
+  const items = CAPTURE_ENGINES.map((engine) => ({ engine, answer: String(formData.get(`ans_${engine}`) ?? ''), urls: str(formData.get(`src_${engine}`)) }));
+  if (!items.some((i) => i.answer.trim())) redirect(backTo(`error=${enc('Paste at least one answer.')}&cap=${pid}&date=${date}`));
+  const res = captureAnswers(s, promptText, date, items);
+  if (res.added && viewer.status.active) autoAnalyse(s);
+  revalidatePath(base(s.id), 'layout');
+  // Next prompt: the first one after this in list order with nothing captured in this week, wrapping round.
+  const done = capturedThisWeek(s.id, date);
+  const after = prompts.findIndex((p) => p.id === res.promptId);
+  const order = [...prompts.slice(after + 1), ...prompts.slice(0, Math.max(0, after))];
+  const next = order.find((p) => !done.has(p.id));
+  const msg = `Saved ${res.added} answer${res.added === 1 ? '' : 's'}${res.duplicates ? `, ${res.duplicates} already captured` : ''}`;
+  if (from) redirect(backTo(`done=captured&msg=${enc(msg)}`));
+  redirect(`${base(s.id)}/answers?done=captured&msg=${enc(msg)}&date=${date}${next ? `&cap=${next.id}` : '&cap=all'}#capture`);
 }

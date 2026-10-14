@@ -6,7 +6,7 @@ import { Toast } from '@/components/Toast';
 import { fmt, fmtDate, Prob, StatusBadge } from '@/components/ui';
 import { Confidence, GoBadge, Tag } from '@/components/briefs/bits';
 import { CopyMarkdown } from '@/components/briefs/CopyMarkdown';
-import { getBrief, getTarget, syncMeasured } from '@/lib/modules/briefs';
+import { expandTarget, getBrief, getTarget, syncMeasured } from '@/lib/modules/briefs';
 import { editBriefAction, moveBriefAction, publishBriefAction } from '@/lib/modules/briefs-actions';
 import { briefMarkdown, EDGE_LABEL, FORMAT_LABEL, INTENT_LABEL, LENGTH_LABEL, outlineToText } from '@/modules/briefs/assemble';
 import type { BriefStatus, Pick } from '@/modules/briefs/types';
@@ -43,7 +43,8 @@ export default async function BriefDetail({ params, searchParams }: { params: Pr
   if (!b || !t || b.site_id !== id) notFound();
   const d = t.decision;
   const c = b.content;
-  const md = briefMarkdown(c, { primary: t.primary, go: d?.go.choice ?? 'create', status: STATUS_LABEL[b.status], site: site.domain, publishedUrl: b.published_url });
+  const ex = expandTarget(b, t);
+  const md = briefMarkdown({ ...c, expandPath: ex?.path ?? null, expandTitle: ex?.title ?? null }, { primary: t.primary, go: d?.go.choice ?? 'create', status: STATUS_LABEL[b.status], site: site.domain, publishedUrl: b.published_url });
   const toast = sp.done ? TOASTS[sp.done] : null;
   const angleNames = Object.fromEntries((d?.angles ?? []).map((a) => [a.key, a.label]));
   const move = (status: BriefStatus, label: string, primary = false) => (
@@ -77,6 +78,17 @@ export default async function BriefDetail({ params, searchParams }: { params: Pr
         </div>
       </header>
 
+      {ex && (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-[1.5px] border-[var(--expand)] bg-[var(--expand-bg)] px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-semibold text-[var(--expand)]">Expand an existing page, do not publish a new one</div>
+            <a href={`https://${site.domain}${ex.path}`} target="_blank" rel="noreferrer" className="mono break-all text-[15px] font-medium hover:underline">{ex.path}</a>
+            {ex.title && <div className="text-[13px] text-ink-2">{ex.title}</div>}
+          </div>
+          <p className="max-w-md text-[13px] text-ink-2">It already ranks for this topic. Add the outline&apos;s missing sections to it so a second page does not compete with it.</p>
+        </section>
+      )}
+
       {(b.status === 'writing' || b.status === 'published' || b.status === 'measured') && (
         <section id="publish" className="card flex flex-col gap-3 p-5">
           {b.status === 'measured' ? (
@@ -91,7 +103,7 @@ export default async function BriefDetail({ params, searchParams }: { params: Pr
               <form action={publishBriefAction} className="flex flex-wrap gap-2">
                 <input type="hidden" name="briefId" value={b.id} />
                 <label className="sr-only" htmlFor="pub-url">Published URL</label>
-                <input id="pub-url" name="url" type="text" required defaultValue={b.published_url ?? ''} className="input min-w-0 flex-[1_1_280px]" placeholder={`https://${site.domain}/guides/…`} />
+                <input id="pub-url" name="url" type="text" required defaultValue={b.published_url ?? (ex ? `https://${site.domain}${ex.path}` : '')} className="input min-w-0 flex-[1_1_280px]" placeholder={`https://${site.domain}/guides/…`} />
                 <SubmitButton className="btn btn-primary h-10" pending="Saving…">{b.status === 'published' ? 'Update URL' : 'Mark published'}</SubmitButton>
               </form>
             </>
@@ -131,7 +143,7 @@ export default async function BriefDetail({ params, searchParams }: { params: Pr
           </section>
 
           <section className="card overflow-hidden">
-            <div className="border-b border-line px-6 py-4"><h2 className="text-[15px] font-semibold">Target queries</h2><p className="text-[13px] text-muted">{t.volumeSource === 'search_console' ? 'Volumes are Search Console impressions a month, a floor on demand.' : t.volumeSource === 'sample' ? 'Volumes are made-up sample figures.' : 'Volumes as entered.'} Positions from your latest Search Console data.</p></div>
+            <div className="border-b border-line px-6 py-4"><h2 className="text-[15px] font-semibold">Target queries</h2><p className="text-[13px] text-muted">{t.volumeSource === 'search_console' ? 'Volumes are Search Console impressions a month, a floor on demand.' : t.volumeSource === 'sample' ? 'Volumes are made-up sample figures.' : t.volumeSource === 'cluster' ? 'Volumes from your keyword list in Keyword clusters.' : 'Volumes as entered.'} Positions from your latest Search Console data.</p></div>
             <div className="overflow-x-auto">
               <table className="tbl min-w-[560px]">
                 <thead><tr><th>Query</th><th className="r">Volume</th><th className="r">Position</th><th>Ranking page</th></tr></thead>

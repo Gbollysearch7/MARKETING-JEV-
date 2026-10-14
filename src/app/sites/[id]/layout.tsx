@@ -18,10 +18,10 @@ export default async function SiteLayout({ children, params }: LayoutProps<'/sit
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
       <Sidebar site={site} counts={{ review, pairs, tasks }} live={p.live} model={p.model}
-        account={{ email: viewer.user.email, plan: viewer.status.label, trialDaysLeft: viewer.status.trialDaysLeft, onTrial: viewer.status.onTrial, active: viewer.status.active }} />
+        account={{ email: viewer.user.email, plan: viewer.status.label, trialDaysLeft: viewer.status.trialDaysLeft, onTrial: viewer.status.onTrial, active: viewer.status.active, billingOff: viewer.status.billingOff }} />
       <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 px-5 py-7 md:px-8 lg:px-10">
         {!viewer.status.active && (
-          <div className="mx-auto mb-5 flex max-w-[1180px] flex-wrap items-center justify-between gap-3 rounded-xl bg-bad-bg px-4 py-3 text-[13.5px] text-bad">
+          <div className="no-print mx-auto mb-5 flex max-w-[1180px] flex-wrap items-center justify-between gap-3 rounded-xl bg-bad-bg px-4 py-3 text-[13.5px] text-bad">
             <span>{viewer.status.onTrial ? 'Your free trial has ended.' : 'Your subscription is not active.'} You can still see everything, but scoring and crawling are paused.</span>
             <Link href="/billing" className="btn btn-sm">Choose a plan</Link>
           </div>

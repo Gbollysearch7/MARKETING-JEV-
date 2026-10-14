@@ -24,7 +24,8 @@ const nextConfig: NextConfig = {
   // Lets a second dev server (for example an isolated test instance) run beside the main one.
   distDir: process.env.NEXT_DIST_DIR || '.next',
   // A self-contained server (<distDir>/standalone/server.js) with only the traced node_modules, for the Docker image.
-  output: "standalone",
+  // RANKCALL_LOCAL=1 (set by `npm run app`) runs a normal `next start` build on this computer instead.
+  output: process.env.RANKCALL_LOCAL === "1" ? undefined : "standalone",
   // Trace from this project, not a parent folder that happens to hold another lockfile.
   outputFileTracingRoot: path.resolve(process.cwd()),
   serverExternalPackages: ["better-sqlite3"],

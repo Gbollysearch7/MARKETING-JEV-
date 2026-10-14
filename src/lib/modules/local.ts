@@ -204,6 +204,17 @@ export const latestLocalJob = (siteId: string) => latestJobOf(siteId, JOB_TYPE);
 
 export type StoredReviewData = Omit<ReviewDecision, 'draft'> & { rating: number; edited?: boolean };
 
+/** Jev decisions the next weekly run would make: undecided open reviews and questions, plus one post plan per shop. */
+export function pendingDecisionCount(siteId: string): number {
+  ensureSchema();
+  const locs = new Set(readLocations(siteId).map((l) => l.locId));
+  if (!locs.size) return 0;
+  const decided = new Set((db().prepare('select kind, item_key from local_decisions where site_id = ?').all(siteId) as { kind: string; item_key: string }[]).map((x) => `${x.kind}:${x.item_key}`));
+  const reviews = readReviews(siteId).filter((r) => !r.replied && locs.has(r.locId) && !decided.has(`review:${r.key}`)).length;
+  const questions = readQuestions(siteId).filter((q) => !q.answered && locs.has(q.locId) && !decided.has(`question:${q.key}`)).length;
+  return reviews + questions + locs.size;
+}
+
 export function startLocalJob(siteId: string, redo = false): Job {
   ensureSchema();
   const provider = getProvider(mockLocalAnswer);
@@ -284,6 +295,12 @@ export function readLog(siteId: string, locId?: string, limit = 40): LogRow[] {
   return (locId
     ? db().prepare('select * from local_log where site_id = ? and loc_id = ? order by id desc limit ?').all(siteId, locId, limit)
     : db().prepare('select * from local_log where site_id = ? order by id desc limit ?').all(siteId, limit)) as LogRow[];
+}
+
+/** Actions people logged since a date (auto-approvals excluded), for the weekly progress line. */
+export function actionsSince(siteId: string, since: string): number {
+  ensureSchema();
+  return (db().prepare("select count(*) n from local_log where site_id = ? and created_at >= ? and action != 'Auto-approved reply'").get(siteId, since) as { n: number }).n;
 }
 
 /** Update a decision's status and text. Marking something as posted also updates the stored row, so health reflects it. */

@@ -5,7 +5,7 @@ import { SubmitButton } from '@/components/SubmitButton';
 import { Toast } from '@/components/Toast';
 import { Empty, fmt, PageTitle, Section } from '@/components/ui';
 import { Confidence, GoBadge, Tag } from '@/components/briefs/bits';
-import { clustersForImport, hasQueryData, listBriefs, listTargets, runningBriefJob, syncMeasured, type BriefItem, type BriefTarget } from '@/lib/modules/briefs';
+import { clustersForImport, hasQueryData, MAX_CLUSTER_IMPORT, listBriefs, listTargets, runningBriefJob, syncMeasured, type BriefItem, type BriefTarget } from '@/lib/modules/briefs';
 import {
   addTargetAction, decideTargetsAction, deleteTargetAction, importClustersAction, loadSampleTargetsAction, moveBriefAction,
   pasteTargetsAction, setRelevanceAction, targetsFromSearchConsoleAction,
@@ -26,6 +26,9 @@ const TOASTS: Record<string, [string, 'ok' | 'bad']> = {
   none_new: ['No new targets found', 'bad'], sample: ['Sample targets loaded and being decided', 'ok'], deciding: ['Deciding targets. Progress is shown above.', 'ok'],
   nothing: ['Every target is already decided', 'ok'], busy: ['A decision run is already in progress', 'bad'], missing: ['Target not found', 'bad'],
   relevance: ['Relevance saved. Decide again to update the call.', 'ok'], deleted: ['Target removed', 'ok'], moved: ['Brief moved', 'ok'],
+  cluster_deciding: ['Cluster added as a target and being decided. Its brief link appears in the highlighted row when Jev says create.', 'ok'],
+  cluster_busy: ['Cluster added as a target. Another decision run is in progress; decide it when that finishes.', 'ok'],
+  cluster_skip: ['This cluster is already a target and Jev decided to skip it. See what would change the call.', 'ok'],
 };
 
 const SOURCE_LABEL: Record<BriefTarget['source'], string> = { manual: 'Typed', search_console: 'Search Console', cluster: 'Cluster', sample: 'Sample' };
@@ -74,6 +77,7 @@ function BoardCard({ b, t, siteId }: { b: BriefItem; t: BriefTarget | undefined;
       </div>
       <Link href={`/sites/${siteId}/briefs/${b.id}`} className="font-semibold leading-snug hover:underline">{b.content.title}</Link>
       <div className="mono break-words text-[12px] text-muted">{t?.primary}</div>
+      {go?.choice === 'expand_existing' && b.content.expandPath && <div className="text-[12px] text-ink-2">Expand <span className="mono break-all">{b.content.expandPath}</span></div>}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted">
         <span>{LENGTH_LABEL[b.content.length]}</span>
         {go && t?.decision && <Confidence p={go.p} router={t.decision.router} />}
@@ -211,8 +215,8 @@ export default async function BriefsPage({ params, searchParams }: PageProps<'/s
               </form>
               <form action={importClustersAction} className="flex flex-col gap-1.5">
                 <input type="hidden" name="siteId" value={id} />
-                <SubmitButton className="btn h-10" pending="Importing…" disabled={!clusters.length}>Import from Keyword clusters</SubmitButton>
-                <p className="text-[12.5px] text-muted">{clusters.length ? `${clusters.length} clusters, ${gapClusters} with no page yet (imported first).` : <>No clusters yet. Run <Link className="underline" href={`/sites/${id}/keywords`}>Keyword clusters</Link> first.</>}</p>
+                <SubmitButton className="btn h-10" pending="Importing…" disabled={!gapClusters}>Import gap clusters</SubmitButton>
+                <p className="text-[12.5px] text-muted">{clusters.length ? <>{gapClusters ? `${fmt(gapClusters)} of ${fmt(clusters.length)} clusters have no page yet; the largest ${fmt(Math.min(gapClusters, MAX_CLUSTER_IMPORT))} become targets.` : `None of your ${fmt(clusters.length)} clusters is a gap.`} For any other cluster, use “Create a brief” on its <Link className="underline" href={`/sites/${id}/keywords`}>cluster page</Link>.</> : <>No clusters yet. Run <Link className="underline" href={`/sites/${id}/keywords`}>Keyword clusters</Link> first.</>}</p>
               </form>
               <div className="flex flex-col gap-1.5 border-t border-line pt-4">
                 <SampleButton siteId={id} />
@@ -239,7 +243,7 @@ export default async function BriefsPage({ params, searchParams }: PageProps<'/s
                     const d = t.decision;
                     const b = briefByTarget.get(t.id);
                     return (
-                      <tr key={t.id}>
+                      <tr key={t.id} id={`t-${t.id}`} className={sp.t === t.id ? 'scroll-mt-24 [&>td]:bg-selected' : 'scroll-mt-24'}>
                         <td className="max-w-[300px]">
                           <div className="font-semibold">{t.primary}</div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-muted"><Tag>{SOURCE_LABEL[t.source]}</Tag>{t.keywords.length} keyword{t.keywords.length === 1 ? '' : 's'}</div>
@@ -258,7 +262,7 @@ export default async function BriefsPage({ params, searchParams }: PageProps<'/s
                         </td>
                         <td>{page ? <><div className="mono break-all text-[12.5px]">{page.path}</div><div className="text-[12px] text-muted">position {page.position.toFixed(1)}</div></> : <span className="text-[12.5px] text-muted">No page in the top 20</span>}</td>
                         <td>
-                          <form action={setRelevanceAction} className="flex items-center gap-1.5">
+                          <form action={setRelevanceAction} className="relative flex items-center gap-1.5">
                             <input type="hidden" name="targetId" value={t.id} />
                             <label className="sr-only" htmlFor={`rel-${t.id}`}>Business relevance for {t.primary}</label>
                             <RelevanceSelect id={`rel-${t.id}`} value={t.relevance} />

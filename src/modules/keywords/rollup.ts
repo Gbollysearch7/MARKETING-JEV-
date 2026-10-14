@@ -43,6 +43,9 @@ function majority<T extends string>(values: (T | null)[], weights: number[]): T 
   return best;
 }
 
+/** Share of a cluster's volume a single competing keyword needs before its page counts as a claimant. */
+export const CLAIM_SHARE = 0.25;
+
 export interface ClusterRollup {
   intent: KeywordIntent | null;
   stage: BuyingStage | null;
@@ -69,14 +72,19 @@ export function rollup(kws: ScoredKeyword[]): ClusterRollup {
   const choice = majority(base.map((k) => k.page), w);
   const gap = choice === NEW_PAGE || (choice == null && base.length > 0 && base.every((k) => k.page == null));
   const mappedPath = choice && choice !== NEW_PAGE ? choice : null;
+  // Evidence per competing page: keywords that chose it, or that currently rank on it in the top 20.
   const claims = new Map<string, Set<string>>();
-  const chosen = new Map<string, number>();
-  for (const k of base) if (k.page && k.page !== NEW_PAGE) chosen.set(k.page, (chosen.get(k.page) ?? 0) + 1);
+  const add = (path: string, kw: string) => (claims.get(path) ?? claims.set(path, new Set()).get(path)!).add(kw);
   for (const k of base) {
-    if (k.page && k.page !== NEW_PAGE && k.page !== mappedPath && (chosen.get(k.page) ?? 0) >= 2) (claims.get(k.page) ?? claims.set(k.page, new Set()).get(k.page)!).add(k.keyword);
-    if (k.currentPath && k.currentPath !== mappedPath && (k.position == null || k.position <= 20)) (claims.get(k.currentPath) ?? claims.set(k.currentPath, new Set()).get(k.currentPath)!).add(k.keyword);
+    if (k.page && k.page !== NEW_PAGE && k.page !== mappedPath) add(k.page, k.keyword);
+    if (k.currentPath && k.currentPath !== mappedPath && (k.position == null || k.position <= 20)) add(k.currentPath, k.keyword);
   }
-  const list = [...claims.entries()].map(([path, set]) => ({ path, keywords: [...set] })).sort((a, b) => b.keywords.length - a.keywords.length || a.path.localeCompare(b.path));
+  // One stray keyword is noise, not cannibalisation: a page needs two or more keywords, or a quarter of the cluster's volume.
+  const vol = new Map(base.map((k) => [k.keyword, k.volume ?? 0]));
+  const list = [...claims.entries()]
+    .filter(([, set]) => set.size >= 2 || (totalVolume > 0 && [...set].reduce((sum, kw) => sum + (vol.get(kw) ?? 0), 0) / totalVolume >= CLAIM_SHARE))
+    .map(([path, set]) => ({ path, keywords: [...set] }))
+    .sort((a, b) => b.keywords.length - a.keywords.length || a.path.localeCompare(b.path));
   return { intent, stage, mappedPath, gap, alsoClaimedBy: list.map((c) => c.path), totalVolume, claims: list };
 }
 

@@ -6,9 +6,9 @@ import { computeChecks, headTermsFor, queryImpressionMap, toBands } from '../src
 import { mockGateAnswer } from '../src/modules/gate/mock';
 import { finishBatch, normalisePage, parseGateCsv, parseUrlList, toPath } from '../src/modules/gate/parse';
 import { templateReport } from '../src/modules/gate/report';
-import { allowedVerdicts, combine, hardRule, routerFor } from '../src/modules/gate/rules';
+import { allowedVerdicts, combine, failuresOf, hardRule, routerFor } from '../src/modules/gate/rules';
 import { runGate, type Decide } from '../src/modules/gate/run';
-import { findPlaceholders, jaccard, shingleSet, stripHtml, words } from '../src/modules/gate/text';
+import { findPlaceholders, jaccard, pagePlaceholders, shingleSet, stripHtml, words } from '../src/modules/gate/text';
 import type { GatePageInput } from '../src/modules/gate/types';
 
 const page = (path: string, body: string, extra: Partial<GatePageInput> = {}): GatePageInput => ({
@@ -214,4 +214,33 @@ describe('end to end with the mock on the sample batch', async () => {
     expect(rep.find((t) => t.template === 'routes-guide')?.pause).toBe(false);
   });
   it('uses the gate.v1 criteria version', () => expect(GATE_CRITERIA_VERSION).toBe('gate.v1'));
+});
+
+describe('QA fixes', () => {
+  it('ignores template syntax inside code samples', () => {
+    expect(pagePlaceholders('t', 'h', '', stripHtml('<p>Use a shortcode:</p><pre><code>{% image "a.jpg" %} {{ title }}</code></pre><p>Done.</p>'))).toHaveLength(0);
+  });
+
+  it('does not treat null or undefined in technical prose as a placeholder, but catches value leaks', () => {
+    expect(pagePlaceholders('API', 'API', '', 'The function returns null if the element is missing; set it to null to reset.')).toHaveLength(0);
+    expect(pagePlaceholders('t', 'h', '', 'Distance: undefined km')).toHaveLength(1);
+    expect(pagePlaceholders('t', 'h', '', 'Walks in undefined.')).toHaveLength(1);
+    expect(pagePlaceholders('Walks in undefined', 'h', '', 'fine')).toHaveLength(1);
+  });
+
+  it('tells copies in one batch to differ, rather than pointing each at another killed copy', () => {
+    const body = Array.from({ length: 60 }, (_v, i) => `word${i}`).join(' ');
+    const pages = [page('/a', body), page('/b', body), page('/c', body)];
+    const c = computeChecks(pages);
+    expect(c[0].duplicateGroup).toBe(2);
+    const f = failuresOf(pages[0], c[0], null, false).find((x) => x.f === 'duplicate')!;
+    expect(f.reason).toMatch(/same as 2 other pages in this batch/);
+    expect(f.fix).not.toMatch(/point searchers/);
+  });
+
+  it('describes a short page without a template as short, not as template text', () => {
+    const p = page('/solo', 'A short page with only a handful of words on it.');
+    const [c] = computeChecks([p]);
+    expect(failuresOf(p, c, null, false).find((x) => x.f === 'thin')!.reason).toMatch(/only \d+ words of body text/);
+  });
 });

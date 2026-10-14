@@ -15,6 +15,7 @@ import { runGate } from '@/modules/gate/run';
 import { stripHtml } from '@/modules/gate/text';
 import { GATE_LABEL, type CheckBands, type CodeChecks, type Failure, type GatePageInput, type GateVerdict, type Router } from '@/modules/gate/types';
 import { db, newId, now } from '@/lib/db';
+import { INTERRUPTED, liveJobs } from './contracts';
 import { startModuleJob } from '@/lib/modjobs';
 import { getProvider } from '@/lib/provider';
 import { getJob, listUploads, siteInputs, uploadData, type Job } from '@/lib/repo';
@@ -26,7 +27,7 @@ export const SOURCE_LABEL: Record<BatchSource, string> = { csv: 'CSV', sitemap: 
 export interface GateBatch {
   id: string; site_id: string; name: string; source: BatchSource; status: 'queued' | 'running' | 'done' | 'failed';
   job_id: string | null; page_count: number; counts: Record<GateVerdict, number>; templates: TemplateRow[];
-  notes: string[]; input: { sitemap?: string; urls?: string[] }; model: string | null; avg_ms: number | null;
+  notes: string[]; input: { sitemap?: string; urls?: string[]; limit?: number }; model: string | null; avg_ms: number | null;
   error: string | null; created_at: string; finished_at: string | null;
 }
 
@@ -97,6 +98,13 @@ function ensureSchema() {
 const J = <T,>(s: string | null, fallback: T): T => (s == null ? fallback : (JSON.parse(s) as T));
 
 function parseBatch(r: Record<string, unknown>): GateBatch {
+  // A batch whose job is no longer running in this process was cut off by a restart: mark it failed so it can be scored again.
+  if ((r.status === 'running' || r.status === 'queued') && r.job_id && !liveJobs.has(r.job_id as string)) {
+    const t = now();
+    db().prepare(`update gate_batches set status = 'failed', error = ?, finished_at = ? where id = ?`).run(INTERRUPTED, t, r.id);
+    db().prepare(`update jobs set status = 'failed', error = ?, message = ?, finished_at = ? where id = ? and status = 'running'`).run(INTERRUPTED, INTERRUPTED, t, r.job_id);
+    r = { ...r, status: 'failed', error: INTERRUPTED, finished_at: t };
+  }
   return {
     ...(r as unknown as GateBatch),
     counts: J(r.counts as string, { index: 0, improve: 0, kill: 0 }),
@@ -108,7 +116,7 @@ function parseBatch(r: Record<string, unknown>): GateBatch {
 
 function parsePage(r: Record<string, unknown>): GatePageRow {
   return {
-    ...(r as unknown as GatePageRow),
+    ...({ body: '', h1: '', meta: '', ...r } as unknown as GatePageRow),
     probabilities: J(r.probabilities as string, {}),
     reasons: J(r.reasons as string, []),
     fixes: J(r.fixes as string, []),
@@ -173,7 +181,10 @@ function updateBatch(id: string, patch: Partial<Record<'status' | 'job_id' | 'pa
 
 export interface PageFilter { verdict?: string; template?: string; q?: string; flag?: string }
 
-export function listGatePages(batchId: string, f: PageFilter = {}, flagged?: Set<string>): GatePageRow[] {
+/** Columns for the results table: everything except page text, Jev's raw answers and bands (loaded per page in the detail panel). */
+const LIST_COLS = 'id, batch_id, site_id, idx, path, url, title, query, template, verdict, confidence, probabilities, router, reasons, fixes, failures, rules, checks, model, latency_ms, scored_at';
+
+export function listGatePages(batchId: string, f: PageFilter = {}, flagged?: Set<string>, light = false): GatePageRow[] {
   ensureSchema();
   const where = ['batch_id = ?'];
   const args: unknown[] = [batchId];
@@ -181,7 +192,7 @@ export function listGatePages(batchId: string, f: PageFilter = {}, flagged?: Set
   if (f.verdict === 'pending') where.push('verdict is null');
   if (f.template) { where.push('template = ?'); args.push(f.template); }
   if (f.q) { where.push('(path like ? or title like ?)'); args.push(`%${f.q}%`, `%${f.q}%`); }
-  const rows = (db().prepare(`select * from gate_pages where ${where.join(' and ')} order by case verdict when 'kill' then 0 when 'improve' then 1 when 'index' then 2 else 3 end, confidence desc, idx`).all(...args) as Record<string, unknown>[]).map(parsePage);
+  const rows = (db().prepare(`select ${light ? LIST_COLS : '*'} from gate_pages where ${where.join(' and ')} order by case verdict when 'kill' then 0 when 'improve' then 1 when 'index' then 2 else 3 end, confidence desc, idx`).all(...args) as Record<string, unknown>[]).map(parsePage);
   return f.flag === 'no_impressions' && flagged ? rows.filter((r) => flagged.has(r.path)) : rows;
 }
 
@@ -214,7 +225,7 @@ const UA = 'SEODecisionBot/0.1 (+site owner requested quality check)';
 /** Full main-content text (extractPage keeps only a 1,200-character excerpt). */
 function mainText(html: string): string {
   const $ = cheerio.load(html);
-  $('script, style, noscript, nav, header, footer, aside, form').remove();
+  $('script, style, noscript, nav, header, footer, aside, form, pre, code').remove(); // code samples are not page copy
   const main = $('main').length ? $('main') : $('article').length ? $('article') : $('body');
   return main.text().replace(/\s+/g, ' ').trim();
 }
@@ -255,6 +266,7 @@ export function startGateJob(siteId: string, batchId: string): { job: Job; finis
   let resolve!: () => void;
   const finished = new Promise<void>((r) => (resolve = r));
   const job = startModuleJob(siteId, GATE_JOB, provider, async (ctx) => {
+    liveJobs.add(ctx.jobId);
     try {
       updateBatch(batchId, { status: 'running' });
       const sig = siteSignals(siteId);
@@ -265,8 +277,9 @@ export function startGateJob(siteId: string, batchId: string): { job: Job; finis
         let urls = batch.input.urls ?? [];
         if (batch.source === 'sitemap' && batch.input.sitemap) {
           ctx.progress(0, 1, 'Reading the sitemap');
-          urls = (await readSitemap(batch.input.sitemap, MAX_BATCH_PAGES)).map((e) => e.url);
+          urls = (await readSitemap(batch.input.sitemap, Math.min(MAX_BATCH_PAGES, batch.input.limit ?? MAX_BATCH_PAGES))).map((e) => e.url);
           if (!urls.length) throw new Error('The sitemap has no URLs.');
+          if (batch.input.limit && urls.length >= batch.input.limit) notes.push(`Checked the first ${urls.length} URLs in the sitemap; raise the page limit to check more.`);
         }
         urls = urls.slice(0, MAX_BATCH_PAGES);
         let failed = 0;
@@ -274,7 +287,7 @@ export function startGateJob(siteId: string, batchId: string): { job: Job; finis
         const seen = new Set<string>();
         let i = 0;
         let done = 0;
-        await Promise.all(Array.from({ length: 6 }, async () => {
+        await Promise.all(Array.from({ length: 4 }, async () => { // polite: at most 4 requests at once to the site
           while (i < urls.length) {
             const u = urls[i++];
             try {
@@ -317,6 +330,7 @@ export function startGateJob(siteId: string, batchId: string): { job: Job; finis
       updateBatch(batchId, { status: 'failed', error: err instanceof Error ? err.message : String(err), finished_at: now() });
       throw err;
     } finally {
+      liveJobs.delete(ctx.jobId);
       resolve();
     }
   }, { batchId });

@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 
-type Result = { added: number; duplicates: number; alreadyLinking: number; kind: string; notes: string[]; purpose: string; scoring: boolean; inactive: boolean };
+type Result = { waiting?: number; added: number; duplicates: number; alreadyLinking: number; kind: string; notes: string[]; purpose: string; scoring: boolean; inactive: boolean };
 const KIND: Record<string, string> = { ahrefs: 'Ahrefs backlinks export', semrush: 'Semrush backlinks export', generic: 'prospect list' };
 
 /** Upload a CSV or paste one: competitor backlinks, a prospect list, or the site's own link profile. */
@@ -28,7 +28,7 @@ export function ImportForm({ siteId }: { siteId: string }) {
     setResult(null);
     try {
       const res = await fetch(`/api/sites/${siteId}/links/upload`, { method: 'POST', body: fd });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: res.status === 413 ? 'That file is too large. Export fewer rows or split it.' : `The import failed (HTTP ${res.status}). Try again, or paste the rows instead.` }));
       if (!res.ok) setError(json.error ?? 'Import failed.');
       else {
         setResult(json as Result);
@@ -93,10 +93,10 @@ export function ImportForm({ siteId }: { siteId: string }) {
             <span className="font-medium">
               Read as {KIND[result.kind] ?? result.kind}: {result.added.toLocaleString('en-GB')} added
               {result.duplicates ? `, ${result.duplicates.toLocaleString('en-GB')} already in your list` : ''}
-              {result.alreadyLinking && result.purpose !== 'own_profile' ? `, ${result.alreadyLinking} from domains that already link to you` : ''}.
+              {result.alreadyLinking && result.purpose !== 'own_profile' ? `, ${result.alreadyLinking.toLocaleString('en-GB')} from domains that already link to you` : ''}.
             </span>
             {result.notes.map((n) => <span key={n}>{n}</span>)}
-            <span>{result.scoring ? 'Scoring has started; progress shows at the top of the page.' : result.inactive ? 'Choose a plan in Billing to score them.' : ''}</span>
+            <span>{result.scoring ? 'Scoring has started; progress shows at the top of the page.' : result.inactive ? 'Choose a plan in Billing to score them.' : result.waiting ? `Not scored yet: ${result.waiting.toLocaleString('en-GB')} prospects are waiting. Choose how many to score at the top of the page.` : ''}</span>
           </div>
         )}
       </div>

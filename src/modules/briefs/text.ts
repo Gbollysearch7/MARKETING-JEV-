@@ -56,11 +56,15 @@ export function modifierSet(kws: string[]): Set<string> {
 }
 
 /** The head term: the keyword with modifiers, question words and stopwords removed ("best walking poles uk" -> "walking poles"). */
+/** Verbs a question asks about doing to the topic ("how to store a harness"); stripped from question keywords only. */
+const QUESTION_VERBS = /^(store|storing|clean|cleaning|wash|washing|fix|repair|reproof|reproofing|dry|drying|pack|packing|fit|fitting|measure|maintain|sharpen|pitch|tie|adjust|wear|last|worth|size|break|lace|care|look|after|take|carry|set|up|put|wax|patch|keep|warm|work|works|it|they|them|you|really|actually|best|legal|allowed|safe|dangerous|hard|difficult|easy|free|necessary)$/;
+
 export function headTerm(kw: string): string {
   let k = normKw(kw);
+  const question = isQuestion(k);
   for (const m of MODIFIERS) k = k.replace(new RegExp(m.re.source, 'g'), ' ');
   k = k.replace(QUESTION_START, ' ');
-  const words = k.split(/[^a-z0-9£-]+/).filter((w) => w && !STOP.has(w) && !/^(choose|use|get|make|pick|need|much|many|long|good|go)$/.test(w));
+  const words = k.split(/[^a-z0-9£-]+/).filter((w) => w && !STOP.has(w) && !/^(choose|use|get|make|pick|need|much|many|long|good|go)$/.test(w) && !(question && QUESTION_VERBS.test(w)));
   return words.join(' ').trim();
 }
 

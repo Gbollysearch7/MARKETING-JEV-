@@ -1,6 +1,7 @@
 import 'server-only';
+import { db } from './db';
 import type { GscImport } from '@/engine/ingest/gsc';
-import { periodDays } from '@/engine/site';
+import { periodDays, type SiteInputs } from '@/engine/site';
 import type { Verdict } from '@/engine/verdict/types';
 import { gscUploadsWithPeriod, insertTask, listTasks, openTaskForPath, outcomesForTask, saveOutcome, siteInputs, uploadData, type Brief, type Task, type VerdictRow } from './repo';
 
@@ -12,8 +13,7 @@ function monthlyClicksFrom(g: GscImport | null, days: number, path: string): num
 }
 
 /** A writer-ready brief built in code from the data, per verdict type (PRD section 5, work queue). */
-export function buildBrief(v: VerdictRow, verdict: Verdict, target: string | null): Brief {
-  const inputs = siteInputs(v.site_id);
+export function buildBrief(v: VerdictRow, verdict: Verdict, target: string | null, inputs: SiteInputs = siteInputs(v.site_id)): Brief {
   const qs = (inputs.gscQueries?.pageQueries ?? []).filter((q) => q.path === v.path).sort((a, b) => b.impressions - a.impressions);
   const top = qs.slice(0, 10).map((q) => ({ query: q.query, impressions: q.impressions, position: Math.round(q.position * 10) / 10 }));
   const crawl = inputs.crawl?.pages.find((p) => p.path === v.path);
@@ -86,12 +86,13 @@ export function buildBrief(v: VerdictRow, verdict: Verdict, target: string | nul
 }
 
 /** Approved verdicts become tasks. Leave needs no task; an open task for the same URL is not duplicated. */
-export function taskFromVerdict(v: VerdictRow): Task | null {
+/** Pass `inputs` when creating many tasks at once, so the uploads are parsed once rather than per task. */
+export function taskFromVerdict(v: VerdictRow, inputs?: SiteInputs): Task | null {
   const verdict = (v.final_verdict ?? v.verdict) as Verdict | null;
   if (!verdict || verdict === 'leave') return null;
   if (openTaskForPath(v.site_id, v.path)) return null;
   const target = v.final_target ?? v.target;
-  const inputs = siteInputs(v.site_id);
+  inputs ??= siteInputs(v.site_id);
   const g = inputs.gsc ?? inputs.gscQueries ?? null;
   const days = periodDays(g?.period) ?? 90;
   const siteMonthly = (g?.pages ?? []).reduce((s, p) => s + p.clicks, 0) * (30 / days);
@@ -102,7 +103,7 @@ export function taskFromVerdict(v: VerdictRow): Task | null {
     path: v.path,
     verdict,
     target,
-    brief: buildBrief(v, verdict, target),
+    brief: buildBrief(v, verdict, target, inputs),
     // A human change of verdict has no model forecast; use a neutral range so the outcome is judged on direction.
     forecast_low: sameAsModel ? v.impact_low : 0,
     forecast_high: sameAsModel ? v.impact_high : 0,
@@ -113,6 +114,13 @@ export function taskFromVerdict(v: VerdictRow): Task | null {
 }
 
 const WINDOWS = [30, 60, 90];
+
+function baselineUploadIds(verdictId: string | null): Set<string> {
+  if (!verdictId) return new Set();
+  const row = db().prepare('select j.meta from verdicts v join jobs j on j.id = v.job_id where v.id = ?').get(verdictId) as { meta: string } | undefined;
+  const ids = row ? (JSON.parse(row.meta) as { uploadIds?: Record<string, string> }).uploadIds : undefined;
+  return new Set(Object.values(ids ?? {}));
+}
 
 /**
  * Label completed tasks from later Search Console uploads (PRD section 5, outcome tracking).
@@ -125,9 +133,11 @@ export function measureOutcomes(siteId: string): number {
     if (!t.done_at) continue;
     const done = t.done_at.slice(0, 10);
     const have = new Set(outcomesForTask(t.id).map((o) => o.window_days));
+    // The baseline came from the uploads the decision was scored on; measuring against those would always read zero.
+    const baseline = baselineUploadIds(t.verdict_id);
     for (const w of WINDOWS) {
       if (have.has(w)) continue;
-      const u = uploads.find((x) => x.period_start! >= done && (Date.parse(x.period_end!) - Date.parse(done)) / 86_400_000 >= w - 1);
+      const u = uploads.find((x) => !baseline.has(x.id) && x.period_start! >= done && (Date.parse(x.period_end!) - Date.parse(done)) / 86_400_000 >= w - 1);
       if (!u) continue;
       const g = uploadData<GscImport>(u.id);
       const days = periodDays({ start: u.period_start!, end: u.period_end! })!;

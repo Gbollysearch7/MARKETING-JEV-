@@ -102,23 +102,31 @@ function cols(headers: string[], spec: Record<string, string[]>, exclude: string
 
 const get = (r: Row, c: string | undefined) => (c ? (r[c] ?? '').trim() : '');
 
+/** Location ids are matched across files ignoring case and stray spaces ("so-kes " and "SO-KES" are one shop). */
+export const normLocId = (v: string) => v.trim().replace(/\s+/g, ' ').toUpperCase();
+const getLoc = (r: Row, c: string | undefined) => normLocId(get(r, c));
+
 export function parseLocations(text: string): ParseResult<LocalLocation> {
   const { headers, rows } = parseTable(text, [...A.locId, ...A.name]);
   // Match the specific columns first so "name" does not swallow "location name" style ids.
-  const c = cols(headers, { locId: A.locId.filter((a) => a !== 'location'), postcode: A.postcode, primaryCategory: A.primaryCategory, additionalCategories: A.additionalCategories, lastPostDate: A.lastPostDate, photoCount: A.photoCount, reviewCount: A.reviewCount, rating: A.rating, phone: A.phone, website: A.website, hours: A.hours, description: A.description, address: A.address, name: A.name });
+  const c = cols(headers, { locId: A.locId.filter((a) => a !== 'location'), locality: ['locality', 'city', 'town', 'address line 2'], postcode: A.postcode, primaryCategory: A.primaryCategory, additionalCategories: A.additionalCategories, lastPostDate: A.lastPostDate, photoCount: A.photoCount, reviewCount: A.reviewCount, rating: A.rating, phone: A.phone, website: A.website, hours: A.hours, description: A.description, address: A.address, name: A.name });
   const warnings: string[] = [];
   if (!c.locId && !c.name) throw new Error('Locations need a "location id" or "name" column.');
-  const out: LocalLocation[] = [];
+  const out = new Map<string, LocalLocation>();
   rows.forEach((r, i) => {
     const name = get(r, c.name);
-    const locId = get(r, c.locId) || name;
+    const locId = normLocId(get(r, c.locId) || name);
     if (!locId) { warnings.push(`Row ${i + 2}: no location id or name, skipped.`); return; }
+    if (out.has(locId)) warnings.push(`Row ${i + 2}: ${locId} appears more than once; the later row was used.`);
+    const line1 = get(r, c.address);
+    const town = get(r, c.locality);
+    const address = town && !line1.toLowerCase().includes(town.toLowerCase()) ? [line1, town].filter(Boolean).join(', ') : line1;
     const photos = num(get(r, c.photoCount));
     const rating = num(get(r, c.rating));
     const reviews = num(get(r, c.reviewCount));
-    out.push({
+    out.set(locId, {
       locId, name: name || locId,
-      address: get(r, c.address), postcode: get(r, c.postcode), phone: get(r, c.phone), website: get(r, c.website),
+      address, postcode: get(r, c.postcode), phone: get(r, c.phone), website: get(r, c.website),
       primaryCategory: get(r, c.primaryCategory), additionalCategories: splitList(get(r, c.additionalCategories)),
       hours: get(r, c.hours), description: get(r, c.description),
       photoCount: Number.isFinite(photos) ? photos : null,
@@ -127,7 +135,7 @@ export function parseLocations(text: string): ParseResult<LocalLocation> {
       reviewCount: Number.isFinite(reviews) ? reviews : null,
     });
   });
-  return { rows: out, warnings };
+  return { rows: [...out.values()], warnings };
 }
 
 export function parseReviews(text: string): ParseResult<LocalReview> {
@@ -138,7 +146,7 @@ export function parseReviews(text: string): ParseResult<LocalReview> {
   const warnings: string[] = [];
   const out: LocalReview[] = [];
   rows.forEach((r, i) => {
-    const locId = get(r, c.locId);
+    const locId = getLoc(r, c.locId);
     const rating = parseRating(get(r, c.rating));
     if (!locId) { warnings.push(`Row ${i + 2}: no location id, skipped.`); return; }
     if (!(rating >= 1 && rating <= 5)) { warnings.push(`Row ${i + 2}: rating "${get(r, c.rating)}" is not 1 to 5, skipped.`); return; }
@@ -165,7 +173,7 @@ export function parseQuestions(text: string): ParseResult<LocalQuestion> {
   const warnings: string[] = [];
   const out: LocalQuestion[] = [];
   rows.forEach((r, i) => {
-    const locId = get(r, c.locId);
+    const locId = getLoc(r, c.locId);
     const question = get(r, c.question);
     if (!locId || !question) { warnings.push(`Row ${i + 2}: missing location id or question, skipped.`); return; }
     const date = parseDate(get(r, c.date));
@@ -182,7 +190,7 @@ export function parseCitations(text: string): ParseResult<LocalCitation> {
   const warnings: string[] = [];
   const out: LocalCitation[] = [];
   rows.forEach((r, i) => {
-    const locId = get(r, c.locId);
+    const locId = getLoc(r, c.locId);
     const directory = get(r, c.directory);
     if (!locId || !directory) { warnings.push(`Row ${i + 2}: missing location id or directory, skipped.`); return; }
     out.push({ locId, directory, listedName: get(r, c.listedName), address: get(r, c.address), phone: get(r, c.phone), url: get(r, c.url) });

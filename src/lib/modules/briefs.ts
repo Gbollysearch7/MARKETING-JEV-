@@ -3,6 +3,7 @@ import type { GscImport } from '@/engine/ingest/gsc';
 import { pathKey } from '@/engine/ingest/url';
 import { periodDays, DEFAULT_PERIOD_DAYS } from '@/engine/site';
 import type { SitePage } from '@/modules/briefs/assemble';
+import { coverageOf } from '@/modules/briefs/bands';
 import { mockBriefAnswer } from '@/modules/briefs/mock';
 import { decideTarget, productPathsFor, type TargetContext } from '@/modules/briefs/run';
 import { SAMPLE_TARGETS } from '@/modules/briefs/samples';
@@ -14,7 +15,7 @@ import { mapLimit, runningJobOf, startModuleJob } from '../modjobs';
 import { getProvider } from '../provider';
 import { listUploads, listUrls, siteInputs, uploadData, type Job } from '../repo';
 import { listClusters } from './keywords';
-import type { KeywordCluster } from './contracts';
+import { INTERRUPTED, liveJobs, type KeywordCluster } from './contracts';
 
 /** Module 5 server data: targets, Jev decisions, briefs and the editorial queue. */
 
@@ -161,16 +162,40 @@ export function clustersForImport(siteId: string): KeywordCluster[] {
   return [...listClusters(siteId)].sort((a, b) => Number(b.gap) - Number(a.gap) || b.totalVolume - a.totalVolume);
 }
 
+/** Most gap clusters imported in one go, largest first, so one click never queues hundreds of decisions. */
+export const MAX_CLUSTER_IMPORT = 50;
+
+const clusterTarget = (c: KeywordCluster) => {
+  const kws = [...c.keywords].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+  // The cluster's name is its representative keyword (or the user's rename); use it as primary when it is one of them.
+  const named = kws.find((k) => normKw(k.keyword) === normKw(c.name));
+  return {
+    primary: (named ?? kws[0]).keyword,
+    clusterId: c.id,
+    keywords: kws.slice(0, 30).map((k) => ({ keyword: normKw(k.keyword), volume: k.volume, position: k.position, path: k.currentPath })),
+  };
+};
+
+/** Gap clusters (no page owns them yet) become targets, largest first, up to MAX_CLUSTER_IMPORT. */
 export function importClusters(siteId: string): { added: number; skipped: number } {
-  const clusters = clustersForImport(siteId).filter((c) => c.keywords.length);
-  return addTargets(siteId, clusters.map((c) => {
-    const kws = [...c.keywords].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
-    return {
-      primary: kws[0].keyword,
-      clusterId: c.id,
-      keywords: kws.slice(0, 30).map((k) => ({ keyword: normKw(k.keyword), volume: k.volume, position: k.position, path: k.currentPath })),
-    };
-  }), 'cluster', 'cluster');
+  const clusters = clustersForImport(siteId).filter((c) => c.gap && c.keywords.length).slice(0, MAX_CLUSTER_IMPORT);
+  return addTargets(siteId, clusters.map(clusterTarget), 'cluster', 'cluster');
+}
+
+/** One cluster as a target (any cluster, gap or not). Returns the target, new or already there. */
+export function targetFromCluster(siteId: string, clusterId: string): BriefTarget | null {
+  const c = listClusters(siteId).find((x) => x.id === clusterId);
+  if (!c || !c.keywords.length) return null;
+  const t = clusterTarget(c);
+  addTargets(siteId, [t], 'cluster', 'cluster');
+  return listTargets(siteId).find((x) => x.clusterId === clusterId || x.primary === normKw(t.primary)) ?? null;
+}
+
+/** The brief for a target, if one exists. */
+export function briefForTarget(targetId: string): BriefItem | null {
+  ensureSchema();
+  const r = db().prepare('select * from briefs_items where target_id = ?').get(targetId) as ItemRow | undefined;
+  return r ? toItem(r) : null;
 }
 
 export function loadSampleTargets(siteId: string) {
@@ -193,7 +218,12 @@ function siteContext(siteId: string): TargetContext {
 }
 
 export function runningBriefJob(siteId: string): Job | null {
-  return runningJobOf(siteId, JOB_TYPE);
+  const j = runningJobOf(siteId, JOB_TYPE);
+  if (j && !liveJobs.has(j.id)) {
+    db().prepare(`update jobs set status = 'failed', error = ?, message = ?, finished_at = ? where id = ? and status = 'running'`).run(INTERRUPTED, INTERRUPTED, now(), j.id);
+    return null;
+  }
+  return j;
 }
 
 /** Decide targets in the background: the given ids, or every target that is new or changed since its last decision. */
@@ -203,6 +233,8 @@ export function startDecideJob(siteId: string, ids?: string[]): Job | null {
   if (!todo.length) return null;
   const provider = getProvider(mockBriefAnswer);
   return startModuleJob(siteId, JOB_TYPE, provider, async (ctx) => {
+    liveJobs.add(ctx.jobId);
+    try {
     const sc = siteContext(siteId);
     const index = gscIndex(siteId);
     let briefs = 0;
@@ -217,6 +249,7 @@ export function startDecideJob(siteId: string, ids?: string[]): Job | null {
       if (brief) briefs++; else skipped++;
     }, (d) => ctx.progress(d, todo.length, `Decided ${d} of ${todo.length} targets`));
     return `${briefs} brief${briefs === 1 ? '' : 's'} proposed, ${skipped} skipped`;
+    } finally { liveJobs.delete(ctx.jobId); }
   }, { targets: todo.length });
 }
 
@@ -300,3 +333,13 @@ export function syncMeasured(siteId: string): number {
   }
   return changed;
 }
+
+/** The page an expand_existing brief should add to: stored on newer briefs, recomputed from rankings for older ones. */
+export function expandTarget(b: BriefItem, t: BriefTarget): { path: string; title: string | null } | null {
+  if (t.decision?.go.choice !== 'expand_existing') return null;
+  if (b.content.expandPath) return { path: b.content.expandPath, title: b.content.expandTitle ?? null };
+  const c = coverageOf(targetData(t), new Map());
+  return c.path ? { path: c.path, title: null } : null;
+}
+
+export const BRIEF_STATUS_LABEL: Record<BriefStatus, string> = { proposed: 'Proposed', approved: 'Approved', writing: 'In writing', published: 'Published', measured: 'Measured' };

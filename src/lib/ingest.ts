@@ -5,7 +5,7 @@ import { importBacklinks } from '@/engine/ingest/backlinks';
 import { importCrawlCsv } from '@/engine/ingest/crawl-csv';
 import { importGa4, type Ga4Import } from '@/engine/ingest/ga4';
 import { importGsc, type GscImport } from '@/engine/ingest/gsc';
-import { saveUpload, type Upload } from './repo';
+import { latestUploads, saveUpload, type Upload } from './repo';
 import { measureOutcomes } from './tasks';
 
 export type Slot = 'gsc' | 'ga4' | 'crawl' | 'backlinks';
@@ -16,6 +16,8 @@ export function ingestFile(siteId: string, slot: Slot, filename: string, bytes: 
     case 'gsc': {
       const g = importGsc(filename, bytes);
       if (!g.pages.length) throw new Error('No pages found in this file.');
+      // No need to ask for page and query data the site already has.
+      if (!g.pageQueries.length && latestUploads(siteId).gsc_queries) g.notes = g.notes.filter((n) => !n.includes('page and query CSV'));
       const kind = g.pageQueries.length ? 'gsc_queries' : 'gsc_pages';
       const u = saveUpload(siteId, kind, source, filename, g, g.period, g.pageQueries.length || g.pages.length, g.notes);
       measureOutcomes(siteId);

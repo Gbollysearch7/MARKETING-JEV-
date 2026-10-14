@@ -3,9 +3,9 @@ import { SubmitButton } from '@/components/SubmitButton';
 import { fmt, fmtDate, fmtDateTime } from '@/components/ui';
 import { isChoice, isNoul, isScore } from '@/engine/jev/confidence';
 import type { Prospect } from '@/lib/modules/links';
-import { claimProspectAction, setStatusAction, verifyLinkAction } from '@/lib/modules/links-actions';
+import { addNoteAction, claimProspectAction, setStatusAction, verifyLinkAction } from '@/lib/modules/links-actions';
 import { AUTHORITY_TEXT, LINK_ATTR_TEXT, TRAFFIC_TEXT } from '@/modules/links/features';
-import { ANGLE_LABEL, PROSPECT_TYPE_LABEL, SITE_TYPE_LABEL, STATUS_LABEL, STATUSES, TOXIC_KEYS, type Angle, type ProspectType, type SiteType } from '@/modules/links/types';
+import { ANGLE_LABEL, PROSPECT_TYPE_LABEL, SITE_TYPE_LABEL, STATUS_LABEL, STATUSES, TOXIC_KEYS, type Angle, type OutreachStatus, type ProspectType, type SiteType } from '@/modules/links/types';
 import { LevelBadge, OutreachBadge, pathOf, VERDICT_TONE, VerdictPill } from './bits';
 
 const ROUTER: Record<string, { label: string; cls: string }> = {
@@ -106,6 +106,13 @@ export function ProspectPanel({ p, me, today, back, closeHref, events }: {
             </label>
             <SubmitButton className="btn btn-primary" pending="Saving…">Log status</SubmitButton>
           </form>
+          <form action={addNoteAction} className="flex flex-col gap-1.5">
+            <input type="hidden" name="prospectId" value={p.id} />
+            <input type="hidden" name="back" value={back} />
+            <label htmlFor={`note-${p.id}`} className="label">Note</label>
+            <textarea id={`note-${p.id}`} name="note" rows={2} maxLength={2000} required className="input text-[13.5px]" placeholder="Who you emailed, what they said, when to follow up" />
+            <div><SubmitButton className="btn btn-sm" pending="Saving…">Add note</SubmitButton></div>
+          </form>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-muted">
             <span>Contacted {fmtDate(p.contacted_at)}</span><span>Replied {fmtDate(p.replied_at)}</span><span>Closed {fmtDate(p.closed_at)}</span>
           </div>
@@ -121,7 +128,18 @@ export function ProspectPanel({ p, me, today, back, closeHref, events }: {
             <p className="text-[12.5px] text-muted">Fetches the page (10-second limit, first 1.5 MB) and looks for a link to your domain.</p>
             {p.verify_status && (
               <div className="text-[13px]">
-                {p.verify_status === 'found' && <p className="text-ok">Link found {fmtDateTime(p.verify_at)}: {p.verifyDetail?.links?.slice(0, 2).map((l) => `${l.href}${l.rel ? ` (rel ${l.rel})` : ''}`).join(', ')}</p>}
+                {p.verify_status === 'found' && (() => {
+                  const links = p.verifyDetail?.links ?? [];
+                  const followed = links.filter((l) => !/\b(nofollow|sponsored|ugc)\b/.test(l.rel));
+                  return (
+                    <div className="flex flex-col gap-1">
+                      <p className={followed.length ? 'text-ok' : 'text-warn'}>{followed.length ? 'Followed link found' : 'Link found, but it is nofollow, sponsored or UGC, so it passes little authority'} {fmtDateTime(p.verify_at)}.</p>
+                      <ul className="flex flex-col gap-0.5 text-[12.5px] text-ink-2">
+                        {links.slice(0, 3).map((l, i) => <li key={i} className="break-all"><span className="mono">{l.href}</span>{l.anchor ? ` · “${l.anchor}”` : ''}{l.rel ? <span className="text-muted"> · rel {l.rel}</span> : null}</li>)}
+                      </ul>
+                    </div>
+                  );
+                })()}
                 {p.verify_status === 'not_found' && <p className="text-warn">No link to your site found {fmtDateTime(p.verify_at)}.</p>}
                 {p.verify_status === 'error' && <p className="text-bad">Could not check {fmtDateTime(p.verify_at)}: {p.verifyDetail?.error}</p>}
               </div>
@@ -160,9 +178,14 @@ export function ProspectPanel({ p, me, today, back, closeHref, events }: {
       {events.length > 0 && (
         <div className="flex flex-col gap-1.5 border-t border-line px-5 py-5 sm:px-6">
           <h3 className="text-[13px] font-semibold text-muted">History</h3>
-          {events.map((e, i) => (
+          {events.map((e, i) => e.kind === 'note' ? (
+            <div key={i} className="flex flex-col gap-1 rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
+              <span className="whitespace-pre-wrap break-words">{e.value}</span>
+              <span className="text-[12px] text-muted">{e.by_name ? `${e.by_name} · ` : ''}{fmtDateTime(e.at)}</span>
+            </div>
+          ) : (
             <div key={i} className="flex flex-wrap justify-between gap-2 text-[13px]">
-              <span>{e.kind === 'status' ? `Marked ${e.value}` : e.kind === 'claim' ? `Claimed by ${e.value}` : e.kind === 'release' ? 'Released' : `Link check: ${e.value === 'found' ? 'found' : e.value === 'not_found' ? 'not found' : 'failed'}`}{e.by_name ? <span className="text-muted"> · {e.by_name}</span> : null}</span>
+              <span>{e.kind === 'status' ? `Marked ${(STATUS_LABEL[e.value as OutreachStatus] ?? e.value ?? '').toLowerCase()}` : e.kind === 'claim' ? `Claimed by ${e.value}` : e.kind === 'release' ? 'Released' : `Link check: ${e.value === 'found' ? 'found' : e.value === 'not_found' ? 'not found' : 'failed'}`}{e.by_name ? <span className="text-muted"> · {e.by_name}</span> : null}</span>
               <span className="text-muted">{fmtDateTime(e.at)}</span>
             </div>
           ))}

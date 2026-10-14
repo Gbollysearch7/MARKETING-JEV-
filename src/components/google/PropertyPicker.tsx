@@ -18,12 +18,13 @@ export function PropertyPicker({ siteId, domain, hasGsc, hasGa4 }: { siteId: str
   const [gsc, setGsc] = useState('');
   const [ga4, setGa4] = useState('');
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/google/properties?site=${encodeURIComponent(siteId)}`, { cache: 'no-store', signal: controller.signal })
       .then(async (r) => {
-        const j = await r.json();
+        const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error ?? 'Could not load your Google properties.');
         const l = j as Lists;
         setLists(l);
@@ -32,9 +33,16 @@ export function PropertyPicker({ siteId, domain, hasGsc, hasGa4 }: { siteId: str
       })
       .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message); });
     return () => controller.abort();
-  }, [siteId]);
+  }, [siteId, attempt]);
 
-  if (error) return <p role="alert" className="text-[13px] text-bad">{error}</p>;
+  if (error) {
+    return (
+      <div role="alert" className="flex flex-wrap items-center gap-3 text-[13px] text-bad">
+        <span>{error}</span>
+        <button type="button" className="btn btn-sm" onClick={() => { setError(null); setLists(null); setAttempt((n) => n + 1); }}>Try again</button>
+      </div>
+    );
+  }
   if (!lists) return <p className="text-[13px] text-muted" aria-live="polite">Loading your Search Console and GA4 properties…</p>;
 
   const chosen = lists.gsc.find((s) => s.siteUrl === gsc);

@@ -1,7 +1,7 @@
 import 'server-only';
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { db, newId, now } from './db';
-import { accountStatus } from './plans';
+import { accountStatus, freeLocalCopy } from './plans';
 import type { RawPage } from '../modules/gate/parse';
 import { parseWebflowEvent, verifyWebflowSignature, webflowItemToPage } from '../modules/gate/webflow';
 
@@ -284,7 +284,7 @@ export function authenticateKey(request: Request, scope: Scope, route: string): 
   if (!key.scopes.includes(scope) && !IMPLIED.includes(scope)) return fail(apiError(403, 'insufficient_scope', `This key does not have the ${scope} scope.`, { required_scope: scope }));
   const account = db().prepare('select plan, trial_ends_at, subscription_status from accounts where id = ?').get(key.account_id) as { plan: string; trial_ends_at: string; subscription_status: string | null } | undefined;
   if (!account) return fail(apiError(401, 'invalid_api_key', 'This API key is not valid.'));
-  const status = accountStatus(account);
+  const status = accountStatus(account, Date.now(), { billingOn: !freeLocalCopy() });
   if (!status.active) return fail(apiError(402, 'account_inactive', status.onTrial ? 'The free trial on this account has ended. Choose a plan in Rankcall to keep scoring pages.' : 'The subscription on this account is not active. Update billing in Rankcall to keep scoring pages.'));
   return { key, accountId: key.account_id, status };
 }
@@ -434,7 +434,7 @@ export async function handleWebflowWebhook(request: Request, connectionId: strin
   };
 
   const account = db().prepare('select a.plan, a.trial_ends_at, a.subscription_status from sites s join accounts a on a.id = s.account_id where s.id = ?').get(conn.site_id) as { plan: string; trial_ends_at: string; subscription_status: string | null } | undefined;
-  if (!account || !accountStatus(account).active) {
+  if (!account || !accountStatus(account, Date.now(), { billingOn: !freeLocalCopy() }).active) {
     setWebflowEventResult(conn.id, sig, null, 'account_inactive');
     return apiError(402, 'account_inactive', 'The Rankcall account for this connection has no active plan, so the item was not scored.');
   }

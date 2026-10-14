@@ -8,11 +8,20 @@ import { GoogleCard, GOOGLE_MESSAGES } from '@/components/google/GoogleCard';
 import { Toast } from '@/components/Toast';
 import { Empty, fmt, fmtDate, fmtDateTime, Pager, PageTitle, qs, Section } from '@/components/ui';
 import { deleteUploadAction, loadSamplesAction } from '@/lib/actions';
-import { getSite, latestUploads, listUploads, listUrls, runningJob, templates, type Upload } from '@/lib/repo';
+import { getSite, latestUploads, latestVerdictJob, listJobs, listUploads, listUrls, runningJob, templates, type Upload } from '@/lib/repo';
 
 const SOURCE_TAG: Record<string, string> = { sample: 'sample', google_api: 'Google' };
 const KIND_LABEL: Record<string, string> = { gsc_pages: 'Search Console pages', gsc_queries: 'Page and query data', ga4: 'GA4 landing pages', crawl: 'Crawl', backlinks: 'Backlinks' };
 const SIZE = 50;
+/** Search Console data whose period ended over 45 days ago no longer reflects the site. */
+const isStale = (end: string | null) => Boolean(end && (Date.now() - Date.parse(end)) / 86_400_000 > 45);
+const SOURCES: { kind: Upload['kind']; label: string; need: string; unit: string; improves: string }[] = [
+  { kind: 'gsc_pages', label: 'Search Console pages', need: 'Start here', unit: 'pages', improves: 'Clicks, impressions and position for every page. With Compare on, shows which pages are decaying.' },
+  { kind: 'gsc_queries', label: 'Page and query data', need: 'Recommended', unit: 'page and query rows', improves: 'Finds pages competing for the same searches (cannibalisation) and lists the queries in each brief.' },
+  { kind: 'crawl', label: 'Crawl', need: 'Recommended', unit: 'pages', improves: 'Status codes, noindex, word counts, inlinks and last-updated dates. Finds pages with no search data.' },
+  { kind: 'ga4', label: 'GA4 landing pages', need: 'Optional', unit: 'landing pages', improves: 'Sessions and key events, so pages that convert are never pruned.' },
+  { kind: 'backlinks', label: 'Backlinks', need: 'Optional', unit: 'URLs', improves: 'Referring domains decide between Redirect (keep the links) and Prune.' },
+];
 
 function Current({ u, empty }: { u?: Upload; empty: string }) {
   if (!u) return <span className="text-faint">{empty}</span>;
@@ -40,6 +49,12 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
   const tpls = templates(id);
   const filters = { q: sp.q, template: sp.template, sort: sp.sort };
   const googleMsg = sp.google ? GOOGLE_MESSAGES[sp.google] : undefined;
+  const lastCrawl = listJobs(id, 'crawl', 1)[0];
+  const crawlFailed = lastCrawl?.status === 'failed' && (!latest.crawl || latest.crawl.created_at < lastCrawl.created_at) ? lastCrawl : null;
+  const ready = Boolean(latest.gsc_pages || latest.gsc_queries || latest.crawl);
+  const loaded = Object.keys(latest).length;
+  const lastScore = latestVerdictJob(id);
+  const changed = Boolean(lastScore && all.some((u) => u.created_at > (lastScore.created_at ?? '')));
 
   return (
     <div className="space-y-6">
@@ -54,12 +69,43 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
       {googleMsg && <Toast key={sp.google} message={googleMsg.text} tone={googleMsg.tone} />}
       {running && running.type !== 'google_sync' && <JobProgress key={running.id} jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling sitemap' : 'Scoring URLs'} />}
 
-      <section aria-label="Data coverage" className="card flex flex-wrap items-center justify-between gap-4 p-5">
-        <div><h2 className="font-semibold">{latest.gsc_pages || latest.gsc_queries || latest.crawl ? 'Ready to score' : 'First, import your pages'}</h2>
-          <p className="mt-1 text-[13px] text-muted">{latest.gsc_pages || latest.gsc_queries || latest.crawl ? 'Review the joined URLs below before starting a scoring run.' : 'Choose Search Console or Crawl below. Other sources can be added later.'}</p>
-          <p className="mt-1 text-[12px] text-muted">Analytics protects converting pages. Page-and-query data enables cannibalisation checks. Backlinks help identify valuable pages.</p>
+      {crawlFailed && !running && (
+        <div role="alert" className="rounded-xl bg-bad-bg px-4 py-3 text-[13.5px] text-bad">
+          <span className="font-semibold">The crawl started {fmtDateTime(crawlFailed.created_at)} did not finish.</span> {crawlFailed.error}
         </div>
-        {(latest.gsc_pages || latest.gsc_queries || latest.crawl) && <Link className="btn btn-primary" href={`/sites/${id}`}>Continue to scoring →</Link>}
+      )}
+      <section aria-label="Data coverage" className="card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="font-semibold">{!ready ? 'First, import your pages' : changed ? 'New data since the last score' : lastScore ? 'Everything here is scored' : 'Ready to score'}</h2>
+            <p className="mt-0.5 text-[13px] text-muted">
+              {!ready ? 'Upload a Search Console export or crawl the sitemap. Every other source is optional and sharpens the verdicts.'
+                : changed ? 'Score again so the inbox reflects it. Reviews you already made carry over when the verdict stays the same.'
+                : lastScore ? `Last scored ${fmtDateTime(lastScore.finished_at)}. Upload next week’s Search Console export to track the trend.`
+                : `${fmt(total)} URLs joined from ${loaded} source${loaded === 1 ? '' : 's'}. Review them below, then score.`}
+            </p>
+          </div>
+          {ready && <Link className={`btn ${changed || !lastScore ? 'btn-primary' : ''}`} href={`/sites/${id}`}>{changed ? 'Score again →' : lastScore ? 'Go to Overview' : 'Continue to scoring →'}</Link>}
+        </div>
+        <ul className="divide-y divide-line">
+          {SOURCES.map((src) => {
+            const u = latest[src.kind];
+            const stale = u && src.kind.startsWith('gsc') && isStale(u.period_end);
+            return (
+              <li key={src.kind} className="grid gap-x-4 gap-y-1 px-5 py-3 text-[13px] md:grid-cols-[minmax(0,250px)_minmax(0,1fr)_minmax(0,1.2fr)]">
+                <span className="flex items-center gap-2 font-semibold">
+                  <span aria-hidden className={`h-2 w-2 flex-none rounded-full ${u ? (stale ? 'bg-warn' : 'bg-ok') : 'bg-[var(--line-input)]'}`} />
+                  {src.label}
+                  <span className="text-[11.5px] font-normal text-muted">{src.need}</span>
+                </span>
+                <span className={u ? 'min-w-0 text-ink-2' : 'text-faint'}>
+                  {u ? <><span className="sr-only">Loaded: </span><span className="num">{fmt(u.row_count)}</span> {src.unit}{u.period_start ? ` · ${fmtDate(u.period_start)} to ${fmtDate(u.period_end)}` : ''}{stale && <span className="text-warn"> · over 45 days old</span>}</> : 'Not loaded'}
+                </span>
+                <span className="text-muted">{src.improves}</span>
+              </li>
+            );
+          })}
+        </ul>
       </section>
       <GoogleCard siteId={id} domain={site.domain} />
       <div className="grid gap-4 md:grid-cols-2">
@@ -112,7 +158,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
           <Empty title={sp.q || sp.template ? "No matching URLs" : "No URLs yet"}>{sp.q || sp.template ? <Link href={`/sites/${id}/data`} className="underline">Clear filters</Link> : "Upload a Search Console export or crawl the sitemap."}</Empty>
         ) : (
           <div className="overflow-x-auto">
-            <table className="tbl">
+            <table className="tbl min-w-[960px]">
               <thead>
                 <tr>
                   <th>URL path</th><th className="r">Clicks</th><th className="r">Prev clicks</th><th className="r">Impr.</th><th className="r">Pos.</th>
@@ -148,7 +194,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
 
       {all.length > 0 && (
         <Section title="Upload history" sub="Older uploads stay here so outcomes can compare periods.">
-          <table className="tbl">
+          <div className="overflow-x-auto"><table className="tbl min-w-[640px]">
             <thead><tr><th>Type</th><th>File</th><th>Period</th><th className="r">Rows</th><th>Added</th><th /></tr></thead>
             <tbody>
               {all.map((u) => (
@@ -164,7 +210,7 @@ export default async function DataPage({ params, searchParams }: PageProps<'/sit
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </Section>
       )}
       <p className="text-[12.5px] text-muted">Ready? <Link href={`/sites/${id}`} className="underline">Go to Overview</Link> and score every URL.</p>

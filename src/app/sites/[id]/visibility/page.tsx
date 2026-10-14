@@ -7,9 +7,13 @@ import { Empty, fmt, fmtDate, PageTitle, Prob, Section } from '@/components/ui';
 import { Bar, Delta, EngineChip, OwnerBadge, pct, ReasonBadge, RouterNote, SentimentBadge, SourceChip } from '@/components/visibility/bits';
 import { LossStatusSelect } from '@/components/visibility/LossStatusSelect';
 import { latestJobOf } from '@/lib/modjobs';
-import { ANALYSIS_JOB, dashboard, runningVisibilityJob } from '@/lib/modules/visibility';
+import { analysisWorkload, ANALYSIS_JOB, dashboard, runningVisibilityJob } from '@/lib/modules/visibility';
+import { WaitingBanner } from '@/components/visibility/WaitingBanner';
+import { AUTO_ANALYSE_LIMIT } from '@/modules/visibility/types';
 import { analyseAction, loadSampleAction } from '@/lib/modules/visibility-actions';
 import { ENGINE_LABEL, SOURCE_TYPES } from '@/modules/visibility/types';
+
+const shortDate = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 export default async function Visibility({ params, searchParams }: PageProps<'/sites/[id]/visibility'>) {
   const { id } = await params;
@@ -23,9 +27,15 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
   const openLosses = d.losses.filter((l) => l.stillLost);
   const toast = sp.done === 'sample' ? `Loaded ${sp.n ?? 0} sample answers` : null;
   const sentimentTotal = d.sentiment.reduce((s, x) => s + x.n, 0);
+  const ls = ['todo', 'open', 'in_progress', 'done', 'all'].includes(sp.ls ?? '') ? sp.ls! : 'todo';
+  const lossCount = { todo: d.losses.filter((l) => l.status !== 'done').length, open: d.losses.filter((l) => l.status === 'open').length, in_progress: d.losses.filter((l) => l.status === 'in_progress').length, done: d.losses.filter((l) => l.status === 'done').length, all: d.losses.length } as Record<string, number>;
+  const statusRank = { in_progress: 0, open: 1, done: 2 } as const;
+  const shownLosses = d.losses.filter((l) => ls === 'all' || (ls === 'todo' ? l.status !== 'done' : l.status === ls)).sort((a, b) => statusRank[a.status] - statusRank[b.status]);
   const maxTrend = Math.max(0.01, ...d.trend.map((t) => Math.max(t.visibility ?? 0, t.citation ?? 0)));
 
-  const runButton = (
+  const work = job ? null : analysisWorkload(site);
+  const big = Boolean(work && work.total > AUTO_ANALYSE_LIMIT);
+  const runButton = big ? null : (
     <form action={analyseAction}>
       <input type="hidden" name="siteId" value={id} />
       <SubmitButton className="btn btn-primary" pending="Starting…" disabled={Boolean(job) || d.facts.length === 0}>Explain losses</SubmitButton>
@@ -41,6 +51,7 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
         actions={d.facts.length ? <>{d.losses.length > 0 && <a className="btn" href={`/api/sites/${id}/visibility/export`}>Export register</a>}{runButton}</> : null}
       />
 
+      {work && <WaitingBanner siteId={id} mentions={work.mentions} losses={work.losses} />}
       {job && <div className="card px-5 py-4"><JobProgress jobId={job.id} initial={job} label={job.type === 'visibility-run' ? 'Asking the AI engines' : 'Jev is reading the answers'} /></div>}
 
       {d.facts.length === 0 ? (
@@ -56,13 +67,21 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
         </section>
       ) : (
         <>
+          {d.inProgress && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-sunken px-5 py-4">
+              <div className="text-[13.5px] text-ink-2">
+                <span className="font-semibold text-ink">This week is still being captured:</span> {fmt(d.inProgress.pairs)} of about {fmt(d.inProgress.expected)} prompt and engine pairs so far. The numbers below are for the week of {fmtDate(d.latestDate)} until this week is at least half done.
+              </div>
+              <Link href={`${base}/answers#capture`} className="btn btn-sm">Capture answers</Link>
+            </div>
+          )}
           {d.alert && (
             <div role="status" className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-4 ${d.alert.points > 0 ? 'bg-ok-bg text-ok' : 'bg-bad-bg text-bad'}`}>
               <div>
                 <div className="font-semibold">Visibility {d.alert.points > 0 ? 'rose' : 'fell'} {Math.abs(d.alert.points).toFixed(1)} points</div>
-                <div className="text-[13.5px]">From {pct(d.alert.before)} on {fmtDate(d.alert.from)} to {pct(d.alert.after)} on {fmtDate(d.alert.to)}. Alerts fire when the move between the two latest run dates is over 10 points.</div>
+                <div className="text-[13.5px]">From {pct(d.alert.before)} in the week of {fmtDate(d.alert.from)} to {pct(d.alert.after)} in the week of {fmtDate(d.alert.to)}, on the {fmt(d.alert.pairs)} prompt and engine pairs captured in both weeks. Alerts fire on moves over 10 points.</div>
               </div>
-              <Link href={`${base}/answers?date=${d.alert.to}`} className="btn btn-sm">See the answers</Link>
+              <Link href={`${base}/answers?week=${d.alert.to}`} className="btn btn-sm">See the answers</Link>
             </div>
           )}
 
@@ -85,12 +104,12 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
             <div className="card px-5 py-4">
               <div className="label">Prompts lost</div>
               <div className="display num mt-1 text-[38px] leading-none">{fmt(openLosses.length)}<span className="text-[20px] text-muted"> / {fmt(d.latest.prompts)}</span></div>
-              <div className="mt-1 text-[12.5px] text-muted">on {fmtDate(d.latestDate)}{unexplained ? ` · ${unexplained} not explained yet` : ''}</div>
+              <div className="mt-1 text-[12.5px] text-muted">week of {fmtDate(d.latestDate)}{unexplained ? ` · ${unexplained} not explained yet` : ''}</div>
             </div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-            <Section title="By engine" sub="Latest run date for each engine. Each prompt counts once, averaged over its runs.">
+            <Section title="By engine" sub={`Week of ${fmtDate(d.latestDate)}, against the week before. Each prompt counts once, averaged over its runs.`}>
               <table className="tbl min-w-[520px]">
                 <thead><tr><th>Engine</th><th className="r">Answers</th><th>Visibility</th><th className="r">Citation</th><th className="r">Share of voice</th></tr></thead>
                 <tbody>
@@ -109,7 +128,7 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
                 </tbody>
               </table>
             </Section>
-            <Section title="Share of voice" sub={`Answers naming each brand on ${fmtDate(d.latestDate)}`}>
+            <Section title="Share of voice" sub={`Answers naming each brand in the week of ${fmtDate(d.latestDate)}`}>
               <div className="flex flex-col gap-3 px-4 py-4 sm:px-6">
                 {d.latest.voices.map((v) => (
                   <div key={v.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
@@ -124,7 +143,7 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-            <Section title="Trend by run date" sub="Visibility and citation rate for each date answers were captured.">
+            <Section title="Trend by week" sub="Visibility and citation rate for each week answers were captured (weeks start on Monday).">
               <div className="flex flex-col gap-3 px-4 py-5 sm:px-6">
                 <div className="flex gap-4 text-[12px] text-ink-2" aria-hidden>
                   <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-accent" />Visibility</span>
@@ -143,12 +162,12 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-4">{d.trend.slice(-12).map((t) => <span key={t.date} className="flex-1 truncate text-center text-[11px] text-muted">{fmtDate(t.date)}</span>)}</div>
+                <div className="flex gap-4">{d.trend.slice(-12).map((t) => <span key={t.date} className="flex-1 truncate text-center text-[11px] text-muted">{shortDate(t.date)}{d.inProgress?.period === t.date ? ' (so far)' : ''}</span>)}</div>
                 <details className="text-[12.5px]">
                   <summary className="cursor-pointer text-muted">Show as a table</summary>
                   <div className="mt-2 overflow-x-auto">
                     <table className="tbl min-w-[460px]">
-                      <thead><tr><th>Run date</th><th className="r">Answers</th><th className="r">Visibility</th><th className="r">Citation</th><th className="r">Share of voice</th></tr></thead>
+                      <thead><tr><th>Week of</th><th className="r">Answers</th><th className="r">Visibility</th><th className="r">Citation</th><th className="r">Share of voice</th></tr></thead>
                       <tbody>{d.trend.map((t) => <tr key={t.date}><td>{fmtDate(t.date)}</td><td className="r num">{t.answers}</td><td className="r num">{pct(t.visibility)}</td><td className="r num">{pct(t.citation)}</td><td className="r num">{pct(t.shareOfVoice)}</td></tr>)}</tbody>
                     </table>
                   </div>
@@ -171,9 +190,9 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
                       );
                     })}
                   </div>
-                ) : <p className="text-[13px] text-muted">No answers mention you on the latest run date.</p>}
+                ) : <p className="text-[13px] text-muted">No answers mention you in the week of {fmtDate(d.latestDate)}.</p>}
                 <div>
-                  <div className="label mb-2">Cited sources, latest run</div>
+                  <div className="label mb-2">Cited sources, week of {fmtDate(d.latestDate)}</div>
                   <div className="flex flex-wrap gap-1.5">
                     {SOURCE_TYPES.filter((t) => d.sourceMix[t]).map((t) => <SourceChip key={t} t={t} n={d.sourceMix[t]} />)}
                     {!Object.keys(d.sourceMix).length && <span className="text-[13px] text-muted">No URLs were cited.</span>}
@@ -183,22 +202,40 @@ export default async function Visibility({ params, searchParams }: PageProps<'/s
             </Section>
           </div>
 
+          {!d.pagesKnown && d.losses.length > 0 && (
+            <p className="rounded-xl bg-warn-bg px-4 py-3 text-[13.5px] text-warn">
+              No crawl or Search Console pages are uploaded for this site, so Jev cannot tell whether one of your pages already covers a lost prompt. Add them on <Link className="underline" href={`/sites/${id}/data`}>Data sources</Link>, then run “Explain losses” again for sharper reasons.
+            </p>
+          )}
+          <div id="losses" className="scroll-mt-6" />
           <Section
             title="Loss register"
-            sub={`Prompts where you are named in fewer than half the runs on an engine, on ${fmtDate(d.latestDate)}. Mark a fix done to measure the prompt again 30 days later.`}
+            sub={`Prompts where you are named in fewer than half the runs on an engine in the week of ${fmtDate(d.latestDate)}. Work through them: set a fix in progress, mark it done, and the prompt is measured again 30 days later.`}
             actions={unexplained ? <span className="text-[12.5px] text-warn">{unexplained} waiting for Jev</span> : lastJob ? <span className="text-[12px] text-muted">Explained by {lastJob.model}</span> : null}
           >
+            {d.losses.length > 0 && (
+              <nav aria-label="Filter the loss register" className="flex flex-wrap gap-1.5 border-b border-line px-4 py-3 sm:px-6">
+                {([['todo', 'To do'], ['in_progress', 'In progress'], ['open', 'Open'], ['done', 'Done'], ['all', 'All']] as const).map(([k, label]) => (
+                  <Link key={k} href={`${base}${k === 'todo' ? '' : `?ls=${k}`}#losses`} scroll={false} aria-current={ls === k ? 'true' : undefined}
+                    className={`rounded-full border px-3 py-1 text-[12.5px] ${ls === k ? 'border-[var(--primary)] bg-[var(--primary)] font-semibold text-[var(--primary-fg)]' : 'border-line bg-surface text-ink-2 hover:border-line-strong'}`}>
+                    {label} · {lossCount[k]}
+                  </Link>
+                ))}
+              </nav>
+            )}
             {d.losses.length === 0 ? (
               <Empty title="No prompts lost">You are named in at least half the runs for every prompt on every engine.</Empty>
+            ) : shownLosses.length === 0 ? (
+              <Empty title={ls === 'done' ? 'Nothing marked done yet' : 'Nothing here'}>{ls === 'done' ? 'Mark a fix done to measure the prompt again 30 days later.' : <Link className="underline" href={`${base}?ls=all#losses`}>Show every lost prompt</Link>}</Empty>
             ) : (
               <table className="tbl min-w-[1080px]">
                 <thead><tr><th>Prompt</th><th>Won by</th><th>Most likely reason</th><th>Fix and owner</th><th className="r">Confidence</th><th>Status</th><th>30 days after done</th></tr></thead>
                 <tbody>
-                  {d.losses.map((l) => (
+                  {shownLosses.map((l) => (
                     <tr key={l.promptId} className={l.stillLost ? '' : 'opacity-80'}>
                       <td className="max-w-[240px]">
                         <Link href={`${base}/prompts/${l.promptId}`} className="font-medium hover:underline">{l.prompt}</Link>
-                        <div className="mt-1 flex flex-wrap gap-1">{l.stillLost ? l.engines.map((e) => <EngineChip key={e} e={e} />) : <span className="text-[12px] text-ok">Won back on the latest run</span>}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">{l.stillLost ? l.engines.map((e) => <EngineChip key={e} e={e} />) : <span className="text-[12px] text-ok">Won back in the latest week</span>}</div>
                       </td>
                       <td className="text-ink-2">{l.winner ?? <span className="text-muted">No named competitor</span>}</td>
                       <td><div className="flex flex-col items-start gap-1"><ReasonBadge r={l.reason} /><RouterNote r={l.router} /></div></td>

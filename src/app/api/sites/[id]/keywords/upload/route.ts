@@ -18,8 +18,11 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   if (!(file instanceof File) || file.size === 0) return back({ error: 'Choose a CSV file to upload.' });
   if (file.size > MAX_BYTES) return back({ error: 'That file is over 50 MB.' });
   try {
-    const input = parseKeywordCsv(decodeBytes(new Uint8Array(await file.arrayBuffer())));
-    if (!input.rows.length) return back({ error: 'No keywords found in that file.' });
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes[0] === 0x50 && bytes[1] === 0x4b) return back({ error: 'That looks like an Excel or zip file. Export the sheet as CSV (File → Download → CSV) and upload that.' });
+    if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return back({ error: 'That is a PDF. Upload the keyword export as a CSV or TSV file.' });
+    const input = parseKeywordCsv(decodeBytes(bytes));
+    if (!input.rows.length) return back({ error: 'No keywords found in that file. It needs a column named Keyword, Query or Search term.' });
     const inp = saveInput(id, 'csv', file.name, input);
     startKeywordsRun(id, inp.id);
     return back({ done: `${inp.count.toLocaleString('en-GB')} keywords imported from ${file.name}. Scoring has started.` });

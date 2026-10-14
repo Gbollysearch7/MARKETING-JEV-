@@ -5,10 +5,19 @@ import { cache } from 'react';
 import { hashPassword, newToken, sha256, verifyPassword } from './crypto';
 import { db, newId, now } from './db';
 import { apiError, authenticateKey, keyInQuery, logKeyUsage, type Scope } from './apikeys';
-import { accountStatus, TRIAL_DAYS } from './plans';
+import { accountStatus, TRIAL_DAYS, freeLocalCopy } from './plans';
 import type { Site } from './repo';
 
 export const SESSION_COOKIE = 'sdp_session';
+
+/**
+ * HTTPS-only session cookies in production, except when running on this computer (`npm run app` sets
+ * RANKCALL_LOCAL=1): Safari drops Secure cookies on http://localhost, which would make sign-in fail.
+ */
+export function secureCookies(env: Record<string, string | undefined> = process.env): boolean {
+  if (env.RANKCALL_LOCAL === '1') return false;
+  return env.NODE_ENV === 'production';
+}
 const SESSION_DAYS = 30;
 
 export interface Account { id: string; name: string; plan: string; trial_ends_at: string; subscription_status: string | null; stripe_customer_id: string | null; stripe_subscription_id: string | null; created_at: string }
@@ -56,7 +65,7 @@ export async function startSession(userId: string) {
   const token = newToken();
   const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   db().prepare('insert into sessions (token_hash, user_id, expires_at, created_at) values (?, ?, ?, ?)').run(sha256(token), userId, expires.toISOString(), now());
-  (await cookies()).set(SESSION_COOKIE, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', expires });
+  (await cookies()).set(SESSION_COOKIE, token, { httpOnly: true, secure: secureCookies(), sameSite: 'lax', path: '/', expires });
 }
 
 export async function endSession() {
@@ -77,12 +86,22 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
   void _e;
   const account = getAccount(user.account_id);
   if (!account) return null;
-  return { user, account, status: accountStatus(account) };
+  return { user, account, status: accountStatus(account, Date.now(), { billingOn: !freeLocalCopy() }) };
 });
 
 export async function requireViewer(): Promise<Viewer> {
   const v = await getViewer();
-  if (!v) redirect('/login');
+  if (!v) {
+    // A cookie without a live session means the session expired or was signed out elsewhere: say so, and come back here after.
+    const { headers } = await import('next/headers');
+    const had = (await cookies()).has(SESSION_COOKIE);
+    const path = (await headers()).get('x-rankcall-path');
+    const params = new URLSearchParams();
+    if (had) params.set('expired', '1');
+    if (path && path.startsWith('/') && !path.startsWith('//') && !path.startsWith('/login')) params.set('next', path);
+    const q = params.toString();
+    redirect(q ? `/login?${q}` : '/login');
+  }
   return v;
 }
 

@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "app": "bash scripts/app.sh",
+    "backup": "bash scripts/backup.sh",
+    "admin": "tsx scripts/admin.mts",
+    "test": "vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

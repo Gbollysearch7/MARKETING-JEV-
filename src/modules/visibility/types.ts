@@ -7,6 +7,9 @@ export const ENGINE_LABEL: Record<Engine, string> = {
   chatgpt: 'ChatGPT', claude: 'Claude', perplexity: 'Perplexity', gemini: 'Gemini', ai_overviews: 'AI Overviews', other: 'Other',
 };
 
+/** Engines offered in the quick-capture form, in the order people usually check them. */
+export const CAPTURE_ENGINES: Engine[] = ['chatgpt', 'claude', 'perplexity', 'gemini', 'ai_overviews'];
+
 export type Position = 'first' | 'early' | 'late' | 'absent';
 export const POSITION_LABEL: Record<Position, string> = { first: 'First mention', early: 'Early', late: 'Late', absent: 'Not mentioned' };
 
@@ -54,3 +57,7 @@ export interface ParsedAnswer {
 export interface Span { start: number; end: number; kind: 'brand' | 'competitor'; label: string }
 
 export type Router = 'auto' | 'review' | 'uncertain';
+
+/** Jev passes bigger than this are never started automatically after an import; the founder chooses. */
+export const AUTO_ANALYSE_LIMIT = 200;
+export const shouldAutoAnalyse = (decisions: number) => decisions > 0 && decisions <= AUTO_ANALYSE_LIMIT;

@@ -7,11 +7,15 @@ const MAX_BYTES = 200 * 1024 * 1024;
 export async function POST(request: Request, ctx: RouteContext<'/api/sites/[id]/upload'>) {
   const { id } = await ctx.params;
   if (!(await siteForRequest(id))) return Response.json({ error: 'Site not found' }, { status: 404 });
-  const form = await request.formData();
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_BYTES + 1024 * 1024) return Response.json({ error: 'Files are over 200 MB. Upload them one at a time, or zip them first.' }, { status: 413 });
+  let form: FormData;
+  try { form = await request.formData(); } catch { return Response.json({ error: 'The upload did not arrive in full. Try again.' }, { status: 400 }); }
   const slot = String(form.get('slot')) as Slot;
   if (!SLOTS.includes(slot)) return Response.json({ error: 'Unknown upload type' }, { status: 400 });
-  const files = form.getAll('file').filter((f): f is File => f instanceof File && f.size > 0);
-  if (!files.length) return Response.json({ error: 'Choose a file' }, { status: 400 });
+  const all = form.getAll('file').filter((f): f is File => f instanceof File);
+  if (!all.length) return Response.json({ error: 'Choose a file' }, { status: 400 });
+  const files = all.filter((f) => f.size > 0);
+  if (!files.length) return Response.json({ results: all.map((f) => ({ file: f.name || 'File', ok: false, message: 'This file is empty. Export it again and upload the new file.' })) }, { status: 422 });
   const results: { file: string; ok: boolean; message: string; notes?: string[] }[] = [];
   for (const f of files) {
     if (f.size > MAX_BYTES) { results.push({ file: f.name, ok: false, message: 'File is over 200 MB' }); continue; }

@@ -6,9 +6,11 @@ import { Toast } from '@/components/Toast';
 import { Empty, fmt, fmtDate, PageTitle, Pager, qs, Section } from '@/components/ui';
 import { EngineChip, PositionBadge, SentimentBadge, SourceChip } from '@/components/visibility/bits';
 import { latestJobOf } from '@/lib/modjobs';
-import { answerFacts, engineStatus, listAnswers, listPrompts, MAX_LIVE_PROMPTS, RUN_JOB, runningVisibilityJob } from '@/lib/modules/visibility';
+import { analysisWorkload, answerFacts, capturedThisWeek, engineStatus, listAnswers, listPrompts, MAX_LIVE_PROMPTS, RUN_JOB, runningVisibilityJob, ukToday } from '@/lib/modules/visibility';
+import { CaptureForm } from '@/components/visibility/CaptureForm';
+import { WaitingBanner } from '@/components/visibility/WaitingBanner';
 import { clearAnswersAction, liveRunAction, loadSampleAction, pasteAnswersAction } from '@/lib/modules/visibility-actions';
-import { runDates } from '@/modules/visibility/aggregate';
+import { addDays, runDates, weekStart } from '@/modules/visibility/aggregate';
 import { MAX_OUTPUT_TOKENS, RUNS_PER_PROMPT } from '@/modules/visibility/runners';
 import { ENGINE_LABEL, ENGINES, SOURCE_TYPES } from '@/modules/visibility/types';
 
@@ -19,9 +21,12 @@ best hiking boots for beginners,chatgpt,"Here are some options: …",https://exa
 export default async function VisibilityAnswers({ params, searchParams }: PageProps<'/sites/[id]/visibility/answers'>) {
   const { id } = await params;
   const sp = (await searchParams) as Record<string, string | undefined>;
-  await requireSite(id);
+  const { site } = await requireSite(id);
   const page = Math.max(1, Number(sp.page) || 1);
-  const f = { engine: sp.engine, date: sp.date, mentioned: sp.mentioned, prompt: sp.prompt };
+  const f = { engine: sp.engine, date: sp.done === 'captured' ? undefined : sp.date, week: sp.week, mentioned: sp.mentioned, prompt: sp.prompt };
+  const today = ukToday();
+  const capDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) && sp.date <= today ? sp.date : today;
+  const weekOf = weekStart(capDate);
   const { rows, total } = listAnswers(id, f, SIZE, (page - 1) * SIZE);
   const facts = answerFacts(id);
   const dates = runDates(facts).reverse();
@@ -33,7 +38,8 @@ export default async function VisibilityAnswers({ params, searchParams }: PagePr
   const lastRun = latestJobOf(id, RUN_JOB);
   const base = `/sites/${id}/visibility`;
   const callCount = Math.min(prompts.length, MAX_LIVE_PROMPTS) * connected.length * RUNS_PER_PROMPT;
-  const toast = sp.done === 'imported' ? `Imported ${sp.n ?? 0} answers${Number(sp.dup) ? `, ${sp.dup} duplicates skipped` : ''}` : sp.done === 'cleared' ? 'All answers deleted' : null;
+  const captured = capturedThisWeek(id, capDate);
+  const toast = sp.done === 'captured' ? (sp.msg ?? 'Saved').slice(0, 120) + (sp.cap === 'all' ? '. Every prompt is captured this week.' : '') : sp.done === 'imported' ? `Imported ${sp.n ?? 0} answers${Number(sp.dup) ? `, ${sp.dup} duplicates skipped` : ''}` : sp.done === 'cleared' ? 'All answers deleted' : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -41,10 +47,17 @@ export default async function VisibilityAnswers({ params, searchParams }: PagePr
       <PageTitle title="Answers" sub="Every captured AI answer, read in code for brand mentions, position, citations and competitors. Jev then scores how you are described and explains each lost prompt." />
       {sp.error && <div role="alert" className="rounded-xl bg-bad-bg px-4 py-3 text-[13.5px] text-bad">{sp.error}</div>}
       {sp.notes && <div className="rounded-xl bg-warn-bg px-4 py-3 text-[13.5px] text-warn">{sp.notes}</div>}
+      {!job && (() => { const w = analysisWorkload(site); return <WaitingBanner siteId={id} mentions={w.mentions} losses={w.losses} back="answers" />; })()}
       {job && <div className="card px-5 py-4"><JobProgress jobId={job.id} initial={job} label={job.type === RUN_JOB ? 'Asking the AI engines' : 'Jev is reading the answers'} /></div>}
 
+      <Section title="Capture answers by hand" sub="Ask each assistant the prompt, then paste its full answer here. Brand mentions, position, competitors and links are read in code as you save.">
+        <div id="capture" className="scroll-mt-6">
+          <CaptureForm siteId={id} prompts={prompts} selectedId={sp.cap && sp.cap !== 'all' ? sp.cap : null} date={capDate} today={today} weekOf={weekOf} captured={captured} />
+        </div>
+      </Section>
+
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Import captured answers" sub="CSV with columns: prompt, engine, answer text, cited URLs (optional), run date. Engines: chatgpt, claude, perplexity, gemini, ai_overviews, other.">
+        <Section title="Import many answers at once" sub="A CSV, or rows copied from a spreadsheet, with columns: prompt, engine, answer text, cited URLs (optional), run date. Engines: chatgpt, claude, perplexity, gemini, ai_overviews, other.">
           <div className="flex flex-col gap-5 px-4 py-5 sm:px-6">
             <form action={`/api/sites/${id}/visibility/upload`} method="post" encType="multipart/form-data" className="flex flex-col gap-2">
               <label className="text-[13px] font-medium" htmlFor="vis-file">Upload a CSV</label>
@@ -55,7 +68,7 @@ export default async function VisibilityAnswers({ params, searchParams }: PagePr
             </form>
             <form action={pasteAnswersAction} className="flex flex-col gap-2">
               <input type="hidden" name="siteId" value={id} />
-              <label className="text-[13px] font-medium" htmlFor="vis-paste">Or paste CSV text</label>
+              <label className="text-[13px] font-medium" htmlFor="vis-paste">Or paste CSV or spreadsheet rows</label>
               <textarea id="vis-paste" name="csv" rows={5} className="input mono text-[12px]" placeholder={EXAMPLE} />
               <div className="flex flex-wrap items-center gap-2">
                 <SubmitButton className="btn" pending="Importing…">Import pasted answers</SubmitButton>
@@ -72,7 +85,21 @@ export default async function VisibilityAnswers({ params, searchParams }: PagePr
           </div>
         </Section>
 
-        <Section title="Run engines live" sub={`Each prompt is sent ${RUNS_PER_PROMPT} times to every connected engine and the answers are dated today.`}>
+        {!connected.length ? (
+          <Section title="Live engine runs are off" sub="No engine API key is set on this server, so nothing is sent to ChatGPT, Claude, Perplexity or Gemini. Capture answers by hand or import them instead.">
+            <div className="flex flex-col gap-3 px-4 py-5 sm:px-6">
+              <ul className="flex flex-wrap gap-1.5">
+                {status.map((s) => <li key={s.engine} className="rounded-full border border-dashed border-line px-2.5 py-1 text-[12.5px] text-muted">{ENGINE_LABEL[s.engine]} · off</li>)}
+              </ul>
+              <details className="text-[12.5px] text-muted">
+                <summary className="cursor-pointer">How to switch them on</summary>
+                <p className="mt-2">Set any of {status.map((s, i) => <span key={s.engine}>{i ? ', ' : ''}<code className="mono">{s.envKey}</code></span>)} in the server environment and restart. Each prompt is then sent {RUNS_PER_PROMPT} times to every connected engine, capped at {fmt(MAX_OUTPUT_TOKENS)} output tokens per answer, and provider charges apply. The runners call each provider&apos;s public API directly and have not yet been tested against live keys. Google AI Overviews and AI Mode cannot be run this way (they need a headless browser), so paste those by hand.</p>
+              </details>
+              {lastRun && <p className="text-[12px] text-muted">Last live run {fmtDate(lastRun.finished_at)}: {lastRun.message}</p>}
+            </div>
+          </Section>
+        ) : (
+          <Section title="Run engines live" sub={`Each prompt is sent ${RUNS_PER_PROMPT} times to every connected engine and the answers are dated today.`}>
           <div className="flex flex-col gap-4 px-4 py-5 sm:px-6">
             <ul className="flex flex-col gap-2">
               {status.map((s) => (
@@ -106,10 +133,11 @@ export default async function VisibilityAnswers({ params, searchParams }: PagePr
             </form>
           </div>
         </Section>
+        )}
       </div>
 
       <Section
-        title={`${fmt(total)} answer${total === 1 ? '' : 's'}`}
+        title={`${fmt(total)} answer${total === 1 ? '' : 's'}${f.week ? ` in the week of ${fmtDate(f.week)} to ${fmtDate(addDays(f.week, 6))}` : ''}`}
         sub="Mentions and citations are found in code; sentiment is Jev's read."
         actions={
           <div className="flex flex-wrap gap-2">
@@ -122,8 +150,8 @@ export default async function VisibilityAnswers({ params, searchParams }: PagePr
             <select className="select h-8 py-0 text-[13px]" aria-label="Filter by mention" defaultValue={f.mentioned ?? ''} form="vis-filter" name="mentioned">
               <option value="">Mentioned or not</option><option value="yes">Mentions you</option><option value="no">Does not mention you</option>
             </select>
-            <form id="vis-filter" action={`${base}/answers`}>{f.prompt && <input type="hidden" name="prompt" value={f.prompt} />}<button className="btn btn-sm">Filter</button></form>
-            {(f.engine || f.date || f.mentioned || f.prompt) && <Link className="btn btn-sm btn-ghost" href={`${base}/answers`}>Clear</Link>}
+            <form id="vis-filter" action={`${base}/answers`}>{f.prompt && <input type="hidden" name="prompt" value={f.prompt} />}{f.week && <input type="hidden" name="week" value={f.week} />}<button className="btn btn-sm">Filter</button></form>
+            {(f.engine || f.date || f.week || f.mentioned || f.prompt) && <Link className="btn btn-sm btn-ghost" href={`${base}/answers`}>Clear</Link>}
           </div>
         }
       >

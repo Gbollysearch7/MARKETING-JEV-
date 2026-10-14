@@ -91,12 +91,12 @@ function reasonsFor(v: Verdict, s: Signals, b: Bands, a: Answers | null, target:
       break;
     }
     case 'redirect':
-      out.push(s.monthlyClicks < 1 ? 'No clicks in the period' : `Only ${Math.round(s.monthlyClicks)} clicks a month`);
+      if (b.monthly_clicks !== 'unknown') out.push(s.monthlyClicks < 1 ? 'No clicks in the period' : `Only ${Math.round(s.monthlyClicks)} clicks a month`);
       if (s.referringDomains) out.push(`${s.referringDomains} referring ${s.referringDomains === 1 ? 'domain' : 'domains'} worth keeping`);
       if (target) out.push(`Closest match: ${target}${targetP != null ? ` (${r3(targetP)})` : ''}`);
       break;
     case 'prune':
-      out.push(s.monthlyClicks < 1 ? 'No clicks in the period' : `Only ${Math.round(s.monthlyClicks)} clicks a month`);
+      if (b.monthly_clicks !== 'unknown') out.push(s.monthlyClicks < 1 ? 'No clicks in the period' : `Only ${Math.round(s.monthlyClicks)} clicks a month`);
       if (s.referringDomains === 0) out.push('No referring domains');
       if (s.conversions === 0) out.push('No conversions');
       if (b.word_count.includes('thin')) out.push(`Thin content (${s.wordCount} words)`);
@@ -146,7 +146,7 @@ export async function runVerdicts(urls: UrlData[], ctx: SiteContext, provider: D
     for (const n of neighbours.get(u.path) ?? []) if (!candPaths.includes(n.path) && candPaths.length < 6) candPaths.push(n.path);
     const candidates: Candidate[] = candPaths.slice(0, 6).map((p, i) => ({ key: `c${i + 1}`, path: p, title: titleByPath.get(p) ?? '' }));
 
-    const rules = applyRules(u, s, ctx.thresholds, candidates.length > 0);
+    const rules = applyRules(u, s, ctx.thresholds, candidates.length > 0, ctx.hasGsc);
     if (rules.skip) {
       return { ...base, skipped: rules.skip, verdict: null, probability: 0, probabilities: {}, router: null, needsApproval: false, reasons: [rules.skip], rulesApplied: [], impact: { low: 0, high: 0 }, state: null, answers: null, model: 'rules', latencyMs: 0, inputTokens: 0 };
     }

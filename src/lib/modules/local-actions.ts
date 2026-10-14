@@ -30,14 +30,15 @@ export async function uploadLocalAction(formData: FormData) {
   let filename = 'pasted.csv';
   if (file && typeof file !== 'string' && file.size > 0) {
     if (file.size > MAX_BYTES) back(base, { err: 'That file is over 900 KB. Split it into smaller files and use "Add to existing".' }, 'data');
-    text = await file.text();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    text = bytes[0] === 0xff && bytes[1] === 0xfe ? new TextDecoder('utf-16le').decode(bytes) : new TextDecoder('utf-8').decode(bytes);
     filename = file.name || 'upload.csv';
   }
   if (!text) back(base, { err: 'Choose a CSV file or paste CSV text.' }, 'data');
   let msg: string;
   try {
     const r = ingestLocal(site.id, kind, mode, text, filename);
-    msg = `${r.rows.toLocaleString('en-GB')} ${kind} ${mode === 'replace' ? 'loaded' : 'added'}${r.warnings.length ? `, ${r.warnings.length} row${r.warnings.length === 1 ? '' : 's'} skipped` : ''}`;
+    msg = `${r.rows.toLocaleString('en-GB')} ${kind} ${mode === 'replace' ? 'loaded' : 'added'}${r.warnings.length ? `. ${r.warnings.length} row${r.warnings.length === 1 ? '' : 's'} to check in Upload history` : ''}`;
   } catch (e) {
     back(base, { err: e instanceof Error ? e.message : 'Could not read that file.' }, 'data');
   }

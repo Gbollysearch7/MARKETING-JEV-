@@ -39,8 +39,8 @@ export function mockVisibilityAnswer(key: string, q: Question, state: State): An
     const thirdParty = tp === 'several' ? 3 : tp === 'one' ? 0.8 : 0;
     const named = l.losing_answers.competitors_named.length;
     const weights: Record<string, number> = {
-      no_page_covers: page === 'none' ? 3.2 : page === 'partial' ? 1 : 0,
-      not_cited_by_trusted_sources: page !== 'none' && !blocked ? 1.6 + (thirdParty < 1.5 ? 1 : 0) : 0,
+      no_page_covers: page === 'none' ? 3.2 : page === 'partial' ? 1 : page.startsWith('unknown') ? 0.8 : 0,
+      not_cited_by_trusted_sources: page !== 'none' && !page.startsWith('unknown') && !blocked ? 1.6 + (thirdParty < 1.5 ? 1 : 0) : 0,
       competitor_third_party: (named ? 0.6 : 0) + thirdParty * 0.6,
       weak_entity: l.brand.visibility_across_all_prompts.startsWith('rarely') ? 2 : 0.4,
       blocked_or_walled: blocked ? 3.4 : 0,

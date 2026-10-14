@@ -142,3 +142,9 @@ export function qs(base: Record<string, string | undefined>, over: Record<string
   const s = p.toString();
   return s ? `?${s}` : '';
 }
+
+/** A URL path that wraps at slashes and hyphens instead of mid-word. */
+export function BreakPath({ path }: { path: string }) {
+  const parts = path.split(/(?<=[/\-_?&=])/);
+  return <>{parts.map((p, i) => <span key={i}>{p}{i < parts.length - 1 && <wbr />}</span>)}</>;
+}

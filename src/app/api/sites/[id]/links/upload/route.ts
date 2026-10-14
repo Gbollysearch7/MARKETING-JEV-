@@ -1,6 +1,6 @@
 import { getViewer, siteForRequest } from '@/lib/auth';
 import { importProspects, startLinksJob, unscoredCount } from '@/lib/modules/links';
-import type { ImportPurpose } from '@/modules/links/types';
+import { shouldAutoScore, type ImportPurpose } from '@/modules/links/types';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -29,9 +29,11 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   }
   try {
     const res = importProspects(site.id, input, { source, purpose, filename });
+    const waiting = unscoredCount(site.id);
     let scoring = false;
-    if (viewer?.status.active && unscoredCount(site.id) > 0) { startLinksJob(site); scoring = true; }
-    return Response.json({ ...res, scoring, inactive: !viewer?.status.active });
+    // Big imports wait for the founder to choose how many to score (each prospect is one Jev decision).
+    if (viewer?.status.active && shouldAutoScore(waiting)) { startLinksJob(site); scoring = true; }
+    return Response.json({ ...res, scoring, waiting: scoring ? 0 : waiting, inactive: !viewer?.status.active });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 422 });
   }

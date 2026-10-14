@@ -17,7 +17,7 @@ export function Sidebar({ site, counts, live, model, account }: {
   counts: { review: number; pairs: number; tasks: number };
   live: boolean;
   model: string;
-  account: { email: string; plan: string; trialDaysLeft: number; onTrial: boolean; active: boolean };
+  account: { email: string; plan: string; trialDaysLeft: number; onTrial: boolean; active: boolean; billingOff?: boolean };
 }) {
   const path = usePathname();
   // The phone menu is open only for the page it was opened on, so navigating closes it.
@@ -118,7 +118,7 @@ export function Sidebar({ site, counts, live, model, account }: {
         <div className="mt-auto flex flex-col gap-2 rounded-xl border border-line bg-surface p-3 shadow-[var(--shadow-sm)]">
           <div className="truncate text-[12.5px] font-medium" title={account.email}>{account.email}</div>
           <Link href="/billing" className={`text-[12px] ${account.active ? 'text-muted hover:text-ink' : 'font-medium text-bad'}`}>
-            {account.onTrial ? (account.active ? `Free trial · ${account.trialDaysLeft} ${account.trialDaysLeft === 1 ? 'day' : 'days'} left` : 'Trial ended · choose a plan') : `${account.plan} plan`}
+            {account.billingOff ? 'Free · billing is off' : account.onTrial ? (account.active ? `Free trial · ${account.trialDaysLeft} ${account.trialDaysLeft === 1 ? 'day' : 'days'} left` : 'Trial ended · choose a plan') : `${account.plan} plan`}
           </Link>
           <ThemeToggle compact />
           <div className="flex items-center justify-between gap-2 border-t border-line pt-2">

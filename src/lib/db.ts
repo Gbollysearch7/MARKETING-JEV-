@@ -171,6 +171,14 @@ create table if not exists outcomes (
   measured_at text not null,
   unique (task_id, window_days)
 );
+create index if not exists verdicts_job_path on verdicts(job_id, path);
+create index if not exists verdicts_site_review on verdicts(site_id, reviewed_by);
+create index if not exists verdicts_site_path on verdicts(site_id, path);
+create index if not exists cannibal_pairs_job on cannibal_pairs(job_id);
+create index if not exists tasks_site on tasks(site_id, status);
+create index if not exists tasks_site_path on tasks(site_id, path);
+create index if not exists labels_site on labels(site_id, created_at);
+create index if not exists jobs_site on jobs(site_id, type, status, finished_at);
 `;
 
 const globalForDb = globalThis as unknown as { __db?: Database.Database; __schema?: string };

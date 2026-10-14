@@ -60,3 +60,10 @@ export const ANGLE_LABEL: Record<Angle, string> = {
 export const VERDICT_LABEL: Record<LinkVerdict, string> = { pursue: 'Pursue', skip: 'Skip', toxic: 'Toxic' };
 export const STATUS_LABEL: Record<OutreachStatus, string> = { new: 'New', contacted: 'Contacted', replied: 'Replied', won: 'Won', lost: 'Lost' };
 export const TOXIC_LABEL: Record<ToxicKey, string> = { sells_links: 'sells links', pbn_footprint: 'shows a private blog network footprint', spam_content: 'carries spam content' };
+
+/**
+ * Imports with more unscored prospects than this are not scored automatically: with a live Jev key each
+ * prospect is one paid decision, so a big export waits for the founder to choose "all" or "top 200".
+ */
+export const AUTO_SCORE_LIMIT = 200;
+export const shouldAutoScore = (unscored: number) => unscored > 0 && unscored <= AUTO_SCORE_LIMIT;

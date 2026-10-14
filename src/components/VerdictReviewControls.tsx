@@ -2,7 +2,7 @@
 
 import { useActionState, useId, useState } from 'react';
 import { VERDICTS, type Verdict } from '@/engine/verdict/types';
-import { reviewVerdictFormAction, type FormState } from '@/lib/actions';
+import { reopenVerdictFormAction, reviewVerdictFormAction, type FormState } from '@/lib/actions';
 import { SubmitButton } from './SubmitButton';
 import { VERDICT_LABEL, VERDICT_MEANING } from './ui';
 
@@ -48,5 +48,18 @@ export function VerdictReviewControls({ id, verdict, alternative, target, back, 
         </form>
       </details>
     </div>
+  );
+}
+
+/** Undo a review so the decision waits in the inbox again. */
+export function ReopenControl({ id }: { id: string }) {
+  const [state, action] = useActionState<FormState, FormData>(reopenVerdictFormAction, {});
+  return (
+    <form action={action} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="verdictId" value={id} />
+      <SubmitButton className="btn btn-sm" pending="Undoing…">Undo review</SubmitButton>
+      {state.error && <span role="alert" className="text-[12.5px] text-bad">{state.error}</span>}
+      {state.success && <span role="status" className="text-[12.5px] text-ok">{state.success}</span>}
+    </form>
   );
 }

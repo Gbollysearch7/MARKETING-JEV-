@@ -1,5 +1,4 @@
-import { strFromU8 } from 'fflate';
-import { findCol, num, numOr0, parseTable } from './csv';
+import { decodeText, findCol, num, numOr0, parseTable } from './csv';
 import { isoDate, type Period } from './gsc';
 import { pathKey } from './url';
 
@@ -17,7 +16,7 @@ const PAGE_ALIASES = ['landing page + query string', 'landing page', 'page path 
 
 /** GA4 Reports > Engagement > Landing page, exported as CSV (Share > Download file). */
 export function importGa4(bytes: Uint8Array): Ga4Import {
-  const text = strFromU8(bytes);
+  const text = decodeText(bytes);
   const { headers, rows } = parseTable(text, PAGE_ALIASES);
   const pageCol = findCol(headers, PAGE_ALIASES)!;
   const sessionsCol = findCol(headers, ['sessions']);

@@ -57,8 +57,11 @@ export function lossState(input: {
   coverage: Coverage;
   pageStatus: PageStatus;
   overallVisibility: number | null;
+  /** False when the site has no crawl or Search Console pages, so page coverage cannot be judged. */
+  pagesKnown?: boolean;
 }) {
   const { lost, coverage } = input;
+  const known = input.pagesKnown !== false;
   const cited: Record<string, string> = {};
   for (const t of SOURCE_TYPES) cited[SOURCE_LABEL[t].toLowerCase()] = countBand(lost.sourceTypeCounts[t] ?? 0);
   const thirdParty = (lost.sourceTypeCounts.review_site ?? 0) + (lost.sourceTypeCounts.forum ?? 0);
@@ -74,10 +77,10 @@ export function lossState(input: {
       our_domain_cited: lost.brandCitedInLosing === 0 ? 'never' : 'sometimes',
     },
     own_site: {
-      page_for_prompt: coverage.match,
+      page_for_prompt: known ? coverage.match : 'unknown (no crawl or Search Console pages uploaded for this site)',
       page_title: coverage.title ?? undefined,
       page_path: coverage.path ?? undefined,
-      page_status: coverage.match === 'none' ? 'no matching page' : input.pageStatus === 'indexable' ? 'indexable' : input.pageStatus === 'not_indexable' ? 'not indexable or returns an error' : 'unknown',
+      page_status: !known ? 'unknown' : coverage.match === 'none' ? 'no matching page' : input.pageStatus === 'indexable' ? 'indexable' : input.pageStatus === 'not_indexable' ? 'not indexable or returns an error' : 'unknown',
     },
   };
 }

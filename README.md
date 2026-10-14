@@ -1,6 +1,14 @@
 # PRD: SEO Decision Platform
 
-> **Run the app.** `npm install`, then `npm run dev`, then open http://localhost:3000. Add a site and tick "Load sample exports" to try it without your own data. Decisions use an offline mock until you create `.env.local` in this folder containing `TYPESAFE_API_KEY=your-key`, then restart. Engine tests: `npx vitest run`. Sample exports are rebuilt with `npx tsx scripts/make-samples.ts`.
+> **Use Rankcall day to day on this computer**
+>
+> 1. One-off setup: `npm install`, then put your Jev key in `.env.local` as `TYPESAFE_API_KEY=...`. Without a key, decisions come from an offline mock with demo quality only.
+> 2. Every day: `npm run app` and open http://localhost:3000. It builds only when the code has changed, then starts in about a second. Stop it with Ctrl+C.
+> 3. Your data lives in `data/app.db`. To copy it to `data/backups/`, run `npm run backup`; this is safe while the app is running.
+> 4. To see who owns which site, run `npm run admin -- status`. Two more commands help with ownership, and both write a backup first:
+>    - `npm run admin -- cleanup-test` removes test accounts and hands back sites they claimed.
+>    - `npm run admin -- give-site <siteId> <email>` moves a site to another account.
+> 5. Developing the code: `npm run dev` gives hot reload, and `npm test` runs the tests. `docs/DEPLOY.md` covers hosting, and `docs/LAUNCH-CHECKLIST.md` covers what is left before launch.
 
 11 Oct 2026 · @Gbolahan
 

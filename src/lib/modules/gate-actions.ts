@@ -31,7 +31,8 @@ export async function checkUrlsAction(formData: FormData) {
   const name = str(formData.get('name'));
   if (sitemap) {
     if (!/^https?:\/\/\S+$/i.test(sitemap)) redirect(back(site.id, { in: 'urls', error: 'The sitemap URL must start with https:// or http://.' }));
-    const batch = createBatch(site.id, name || `Sitemap ${new URL(sitemap).hostname}`, 'sitemap', [], [], { sitemap });
+    const limit = Math.min(MAX_BATCH_PAGES, Math.max(1, Math.floor(Number(str(formData.get('limit'))) || 100)));
+    const batch = createBatch(site.id, name || `Sitemap ${new URL(sitemap).hostname}`, 'sitemap', [], [], { sitemap, limit });
     startGateJob(site.id, batch.id);
     redirect(`/sites/${site.id}/gate/${batch.id}`);
   }

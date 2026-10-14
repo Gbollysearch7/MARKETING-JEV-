@@ -5,12 +5,13 @@ import { updateTaskFormAction, type FormState } from '@/lib/actions';
 import type { Task } from '@/lib/repo';
 import { SubmitButton } from './SubmitButton';
 
-export function TaskEditor({ task, today }: { task: Pick<Task, 'id' | 'owner' | 'due_date' | 'status' | 'done_at'>; today: string }) {
+export function TaskEditor({ task, today, back }: { task: Pick<Task, 'id' | 'owner' | 'due_date' | 'status' | 'done_at'>; today: string; back?: string }) {
   const [state, action, pending] = useActionState<FormState, FormData>(updateTaskFormAction, {});
   const [status, setStatus] = useState(task.status);
   return (
     <form action={action} onReset={(e) => e.preventDefault()} className="grid gap-3 border-b border-line px-5 py-4 sm:grid-cols-2 sm:px-6">
       <input type="hidden" name="taskId" value={task.id} />
+      {back && <input type="hidden" name="back" value={back} />}
       <label className="flex flex-col gap-1 text-[12px] text-muted">Owner<input name="owner" defaultValue={task.owner ?? ''} placeholder="Assign someone" className="input" disabled={pending} /></label>
       <label className="flex flex-col gap-1 text-[12px] text-muted">Due date<input name="due_date" type="date" defaultValue={task.due_date ?? ''} className="input" disabled={pending} /></label>
       <label className="flex flex-col gap-1 text-[12px] text-muted">Status

@@ -252,9 +252,15 @@ textarea.input { height: auto; padding: 10px 12px; }
   .no-print { display: none !important; }
   body, html { background: #fff; }
   .card { border-color: #ddd; box-shadow: none; break-inside: avoid; }
-  .report-card { break-inside: auto; }
+  .report-card { break-inside: auto; border: 0 !important; padding: 0 !important; gap: 28px !important; }
   .report-card section { break-inside: avoid; }
-  @page { margin: 16mm; }
+  .report-card tr { break-inside: avoid; }
+  .report { max-width: none !important; }
+  main { padding: 0 !important; }
+  main > div { max-width: none !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a { text-decoration: none; }
+  @page { margin: 14mm 14mm 16mm; }
 }
 
 .skip-link { position: fixed; top: 8px; left: 8px; z-index: 80; transform: translateY(-160%); padding: 10px 16px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); }

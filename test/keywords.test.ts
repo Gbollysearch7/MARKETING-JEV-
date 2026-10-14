@@ -131,9 +131,15 @@ describe('cluster rollup', () => {
   it('maps to the majority page and flags other claimants', () => {
     const r = rollup([kw('a', { page: '/a' }), kw('b', { page: '/a' }), kw('c', { page: '/a', currentPath: '/old', position: 12 }), kw('d', { page: '/b' }), kw('e', { page: '/b' })]);
     expect(r).toMatchObject({ mappedPath: '/a', gap: false, totalVolume: 500, intent: 'commercial' });
-    expect(r.alsoClaimedBy.sort()).toEqual(['/b', '/old']);
+    // '/old' ranks for one keyword holding 20% of the volume: noise, not a competing page.
+    expect(r.alsoClaimedBy.sort()).toEqual(['/b']);
     expect(r.claims.find((x) => x.path === '/b')?.keywords).toEqual(['d', 'e']);
     expect(isCannibalised(r)).toBe(true);
+  });
+
+  it('counts a single keyword as a claim only when it carries a quarter of the volume', () => {
+    const r = rollup([kw('a', { page: '/a', volume: 100 }), kw('b', { page: '/a', volume: 100 }), kw('big', { page: '/a', volume: 300, currentPath: '/other', position: 5 })]);
+    expect(r.alsoClaimedBy).toEqual(['/other']);
   });
 
   it('is a gap when most keywords choose new_page, and ignores junk in the majority', () => {
@@ -180,5 +186,22 @@ describe('mock battery end to end on the sample list', () => {
     const rolled = groups.map((g) => rollup(g.map((i) => useful[i])));
     expect(rolled.some((r) => r.gap)).toBe(true);
     expect(rolled.some((r) => isCannibalised(r))).toBe(true);
+  });
+});
+
+describe('QA clustering fixes', () => {
+  const items = (ks: string[], intent?: string) => ks.map((keyword) => ({ keyword, volume: 100, intent }));
+  it('does not merge different products on price, size or season words', () => {
+    const product = ['crampons', 'binoculars', 'bag', 'tent', 'bag', 'tent', 'boots', 'poles', 'boots'];
+    const g = clusterKeywords(items(['crampons under £100', 'binoculars under £100', 'sleeping bag under £100', '4 season tent', '4 season sleeping bag', 'how long do tents last', 'how long do boots last', 'walking poles for wide feet', 'hiking boots for wide feet']));
+    for (const grp of g) expect(new Set(grp.map((i) => product[i])).size).toBe(1);
+  });
+  it('keeps how-to care searches apart from buying searches on the same product', () => {
+    const ks = [...items(['climbing harness', 'best climbing harness', 'climbing harness review', 'kids climbing harness'], 'commercial'), ...items(['how to clean climbing harness', 'how to store climbing harness', 'how to wash climbing harness'], 'informational')];
+    const g = clusterKeywords(ks);
+    for (const grp of g) expect(new Set(grp.map((i) => ks[i].intent)).size).toBe(1);
+  });
+  it('names a cluster after the keyword made of its shared words, not a high-volume outlier', () => {
+    expect(clusterName([{ keyword: 'hiking boots leeds', volume: 9000 }, { keyword: 'hiking boots', volume: 500 }, { keyword: 'best hiking boots', volume: 400 }])).toBe('hiking boots');
   });
 });

@@ -1,7 +1,7 @@
 import 'server-only';
 // Relative imports only: tests load this file without the "@/" alias.
 import { db, newId, now as nowIso } from './db';
-import { accountStatus } from './plans';
+import { accountStatus, freeLocalCopy } from './plans';
 
 /**
  * Weekly automatic re-scoring (PRD section 5: verdicts "refreshed weekly"; milestone A6).
@@ -241,7 +241,7 @@ function factsFor(site: SiteRow, nowMs: number): { facts: SiteFacts; urlLimit: n
   const jobRunning = Boolean(d.prepare(`select 1 from jobs where site_id = ? and status = 'running' limit 1`).get(site.id));
   const hasData = Boolean(d.prepare(`select 1 from uploads where site_id = ? and kind in ('gsc_pages', 'gsc_queries', 'crawl') limit 1`).get(site.id));
   const status = site.plan && site.trial_ends_at
-    ? accountStatus({ plan: site.plan, trial_ends_at: site.trial_ends_at, subscription_status: site.subscription_status }, nowMs)
+    ? accountStatus({ plan: site.plan, trial_ends_at: site.trial_ends_at, subscription_status: site.subscription_status }, nowMs, { billingOn: !freeLocalCopy() })
     : null;
   return {
     facts: { setting, firstRunAt, lastScheduledStartAt: lastStarted, lastHandledDueAt: lastHandled, jobRunning, accountActive: Boolean(status?.active), hasData },

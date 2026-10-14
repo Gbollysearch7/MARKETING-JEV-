@@ -11,7 +11,7 @@ import {
   calibration, disavowCandidates, getProspect, latestLinksJob, listImports, listProspects, ownDomainCount, prospectEvents, summary, unscoredCount,
 } from '@/lib/modules/links';
 import { loadLinkSamplesAction, scoreLinksAction } from '@/lib/modules/links-actions';
-import { ANGLE_LABEL, PROSPECT_TYPE_LABEL, PROSPECT_TYPES, SITE_TYPE_LABEL, STATUS_LABEL, STATUSES } from '@/modules/links/types';
+import { AUTO_SCORE_LIMIT, ANGLE_LABEL, PROSPECT_TYPE_LABEL, PROSPECT_TYPES, SITE_TYPE_LABEL, STATUS_LABEL, STATUSES } from '@/modules/links/types';
 
 const SIZE = 30;
 const VIEWS = [
@@ -42,13 +42,26 @@ export default async function Links({ params, searchParams }: PageProps<'/sites/
       {s.total > 0 && (
         <div className="flex flex-wrap gap-2">
           <a className="btn h-11" href={`/api/sites/${id}/links/export`}>Export CSV</a>
-          {unscored > 0 && !running && (
+          {unscored > 0 && unscored <= AUTO_SCORE_LIMIT && !running && (
             <form action={scoreLinksAction}><input type="hidden" name="siteId" value={id} /><SubmitButton className="btn btn-primary h-11" pending="Starting…">Score {fmt(unscored)} new</SubmitButton></form>
           )}
         </div>
       )}
     </header>
   );
+
+  const bigWait = !running && unscored > AUTO_SCORE_LIMIT ? (
+    <section role="status" className="card flex flex-wrap items-center justify-between gap-4 border-[var(--warn-bg)] px-5 py-4">
+      <div className="flex max-w-[640px] flex-col gap-1">
+        <span className="font-semibold">{fmt(unscored)} prospects imported and waiting to be scored</span>
+        <span className="text-[13.5px] text-ink-2">Scoring them all will use about {fmt(unscored)} Jev decisions, one per prospect. Big imports are never scored automatically, so you choose how many.</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <form action={scoreLinksAction}><input type="hidden" name="siteId" value={id} /><SubmitButton className="btn" name="scope" value="all" pending="Starting…">Score all {fmt(unscored)}</SubmitButton></form>
+        <form action={scoreLinksAction}><input type="hidden" name="siteId" value={id} /><SubmitButton className="btn btn-primary" name="scope" value="top" pending="Starting…">Score the top {AUTO_SCORE_LIMIT} by authority</SubmitButton></form>
+      </div>
+    </section>
+  ) : null;
 
   const jobBar = running ? <JobProgress jobId={running.id} initial={running} label="Scoring link prospects" /> : job?.status === 'failed' ? (
     <div className="card border-[var(--bad-bg)] px-5 py-3 text-[13.5px] text-bad">The last scoring run failed: {job.error}. Use “Score new” to retry.</div>
@@ -59,6 +72,7 @@ export default async function Links({ params, searchParams }: PageProps<'/sites/
       <div className="flex flex-col gap-6">
         {toast}
         {header}
+        {bigWait}
         {jobBar}
         <section className="card">
           <Empty title="No prospects yet">
@@ -99,6 +113,7 @@ export default async function Links({ params, searchParams }: PageProps<'/sites/
     <div className="flex flex-col gap-6">
       {toast}
       {header}
+      {bigWait}
       {jobBar}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -116,7 +131,7 @@ export default async function Links({ params, searchParams }: PageProps<'/sites/
           </Link>
         ))}
       </div>
-      {s.unscored > 0 && !running && <p className="-mt-3 text-[13px] text-muted">{fmt(s.unscored)} imported {s.unscored === 1 ? 'prospect is' : 'prospects are'} waiting to be scored.</p>}
+      {s.unscored > 0 && s.unscored <= AUTO_SCORE_LIMIT && !running && <p className="-mt-3 text-[13px] text-muted">{fmt(s.unscored)} imported {s.unscored === 1 ? 'prospect is' : 'prospects are'} waiting to be scored.</p>}
 
       <div className={`${fromUrl ? 'hidden xl:flex' : 'flex'} flex-col gap-3`}>
         <nav aria-label="Verdict" className="flex flex-wrap gap-1.5">

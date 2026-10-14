@@ -249,7 +249,7 @@ export function parseAnswersCsv(text: string, today: string): { rows: ImportedAn
       runIndex: Number.isFinite(run) && run > 0 ? run : null,
     });
   }
-  if (skipped) notes.push(`${skipped} row${skipped === 1 ? '' : 's'} without a prompt or answer were skipped.`);
+  if (skipped) notes.push(`${skipped} row${skipped === 1 ? '' : 's'} without a prompt or answer ${skipped === 1 ? 'was' : 'were'} skipped.`);
   if (unknownEngines) notes.push(`${unknownEngines} row${unknownEngines === 1 ? ' has' : 's have'} an engine name we did not recognise; filed under Other.`);
   if (badDates) notes.push(`${badDates} run date${badDates === 1 ? '' : 's'} could not be read; used today instead.`);
   if (!cDate) notes.push('No run date column; every answer was dated today.');

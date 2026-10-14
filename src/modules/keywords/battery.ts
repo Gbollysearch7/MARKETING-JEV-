@@ -1,6 +1,6 @@
 import type { ChoiceQuestion, Questions } from '../../engine/jev/types';
 import type { BuyingStage, KeywordIntent } from '../../lib/modules/contracts';
-import { buildIdf, MODIFIERS, tokens } from './cluster';
+import { buildIdf, isModifier, tokens } from './cluster';
 import type { KeywordRow } from './input';
 
 export const CRITERIA_VERSION = 'keywords.v1';
@@ -73,7 +73,7 @@ export function candidatePages(keyword: string, currentPath: string | null, ix: 
   ix.toks.forEach((pt, i) => {
     let s = 0;
     let head = false;
-    for (const t of kt) if (pt.includes(t)) { s += ix.idf(t); if (!MODIFIERS.has(t)) head = true; }
+    for (const t of kt) if (pt.includes(t)) { s += ix.idf(t); if (!isModifier(t)) head = true; }
     if (head) scored.push({ i, s: s / Math.sqrt(pt.length || 1) });
   });
   scored.sort((a, b) => b.s - a.s || ix.pages[a.i].path.localeCompare(ix.pages[b.i].path));

@@ -39,7 +39,9 @@ export interface ReviewDecision {
 
 export function reviewDecision(review: LocalReview, loc: Pick<LocalLocation, 'name' | 'phone'>, answers: Answers, settings: LocalSettings): ReviewDecision {
   const act = choiceOf(answers, 'action', REVIEW_ACTIONS, review.rating <= 2 ? 'escalate_to_manager' : 'reply_custom');
-  const th = choiceOf(answers, 'theme', THEMES, 'other');
+  const jevTheme = choiceOf(answers, 'theme', THEMES, 'other');
+  // A star-only review has no theme to pick up, so the reply must not thank them for praise they never wrote.
+  const th = review.text.trim() ? jevTheme : { ...jevTheme, choice: 'other' as Theme };
   const s = answers.sentiment;
   let sentimentScore = review.rating - 1;
   if (isScore(s)) {

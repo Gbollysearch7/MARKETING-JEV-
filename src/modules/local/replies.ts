@@ -29,7 +29,7 @@ const LINES: Record<RatingBand, Record<Theme, string>> = {
     wait_time: "We're glad you were looked after so quickly.",
     cleanliness: "We're pleased you enjoyed browsing the shop.",
     booking: "We're so glad your booking went smoothly.",
-    other: 'We really appreciate you taking the time to write it.',
+    other: 'We really appreciate you taking the time to leave it.',
   },
   four: {
     service: "We're glad your visit went well.",
@@ -75,7 +75,7 @@ export const CUSTOM_PLACEHOLDER = '[Add a sentence about the specific point they
 /** "Sarah K." -> "Sarah". Anonymous or missing authors get a plain greeting. */
 export function greeting(author: string): string {
   const first = author.trim().split(/\s+/)[0] ?? '';
-  if (!first || /^(a|an|the)$/i.test(first) || /anonymous|customer|google user|guest/i.test(author) || !/^[A-Za-zÀ-ÿ'’-]{2,}$/.test(first)) return 'Hello,';
+  if (!first || /^(a|an|the)$/i.test(first) || /anonymous|^anon\b|customer|google user|guest|^a\s+user/i.test(author) || !/^[A-Za-zÀ-ÿ'’-]{2,}$/.test(first)) return 'Hello,';
   return `Hi ${first.charAt(0).toUpperCase()}${first.slice(1)},`;
 }
 
@@ -121,13 +121,18 @@ export function draftAnswer(source: AnswerSource, loc: LocalLocation): string {
     case 'website':
       return loc.website ? `Thanks for asking. You can browse and order online at ${loc.website}.${call}${sign}` : `Thanks for asking. [Add the website.]${sign}`;
     case 'categories':
-      return `Thanks for asking. We're ${/^[aeiou]/i.test(loc.primaryCategory) ? 'an' : 'a'} ${loc.primaryCategory.toLowerCase() || '[type of business]'}${loc.additionalCategories.length ? `, and we also cover ${loc.additionalCategories.slice(0, 3).map((c) => c.toLowerCase()).join(', ')}` : ''}.${call}${sign}`;
+      return `Thanks for asking. We're ${withArticle(loc.primaryCategory) || '[type of business]'}${loc.additionalCategories.length ? `, and we're also ${andList(loc.additionalCategories.slice(0, 3).map(withArticle))}` : ''}.${call}${sign}`;
     case 'description':
       return `Thanks for asking. ${firstSentence(loc.description) || '[Answer from the profile description.]'}${call}${sign}`;
     case 'none':
       return `Thanks for asking. [Write the answer here.]${call}${sign}`;
   }
 }
+
+/** "Outdoor sports store" -> "an outdoor sports store". */
+const withArticle = (c: string) => { const t = c.trim().toLowerCase(); return t ? `${/^[aeiou]/.test(t) ? 'an' : 'a'} ${t}` : ''; };
+/** ["a", "b", "c"] -> "a, b and c" (no Oxford comma, as in British house style). */
+const andList = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
 const firstSentence = (s: string) => (s.match(/^[^.!?]+[.!?]/)?.[0] ?? s.slice(0, 200)).trim();
 

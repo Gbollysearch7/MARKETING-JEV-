@@ -8,7 +8,7 @@ import { parseKeywordToken, parseTargets } from '@/modules/briefs/text';
 import { STATUSES, type BriefStatus, type TargetKeyword } from '@/modules/briefs/types';
 import {
   addTargets, deleteTarget, getBrief, getTarget, importClusters, loadSampleTargets, moveBrief, publishBrief, runningBriefJob,
-  setRelevance, startDecideJob, targetData, targetsFromSearchConsole, updateBriefContent,
+  setRelevance, startDecideJob, targetData, targetsFromSearchConsole, updateBriefContent, targetFromCluster, briefForTarget,
 } from './briefs';
 
 const str = (v: FormDataEntryValue | null) => (v == null ? '' : String(v).trim());
@@ -150,4 +150,24 @@ export async function editBriefAction(formData: FormData) {
   updateBriefContent(b.id, patch);
   revalidatePath(base(b.site_id));
   redirect(`${base(b.site_id)}/${b.id}?done=saved`);
+}
+
+/**
+ * From a keyword cluster straight to a brief: the cluster becomes a target (or the existing one is reused), and it is
+ * decided at once. Opens the brief when one already exists, otherwise the target on the brief desk.
+ */
+export async function briefFromClusterAction(formData: FormData) {
+  const { site, viewer } = await siteFromForm(formData);
+  const t = targetFromCluster(site.id, str(formData.get('clusterId')));
+  if (!t) redirect(`/sites/${site.id}/keywords?error=${encodeURIComponent('That cluster is no longer in the latest run. Refresh and try again.')}`);
+  const existing = briefForTarget(t.id);
+  if (existing) redirect(`${base(site.id)}/${existing.id}`);
+  if (!viewer.status.active) redirect('/billing');
+  let key = 'cluster_skip';
+  if (!t.decision || t.stale) {
+    if (runningBriefJob(site.id)) key = 'cluster_busy';
+    else { startDecideJob(site.id, [t.id]); key = 'cluster_deciding'; }
+  }
+  revalidatePath(base(site.id));
+  redirect(`${base(site.id)}?tab=targets&done=${key}&t=${t.id}#t-${t.id}`);
 }

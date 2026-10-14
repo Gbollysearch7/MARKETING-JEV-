@@ -66,7 +66,7 @@ export interface ParsedImport {
  * Parse an Ahrefs "Backlinks" export, a Semrush backlinks export or a generic list into one row per page.
  * For a referring-domains export (own link profile) a bare domain is accepted as the URL.
  */
-export function parseProspects(input: Uint8Array | string, purpose: ImportPurpose = 'prospects'): ParsedImport {
+export function parseProspects(input: Uint8Array | string, purpose: ImportPurpose = 'prospects', cap = MAX_PER_UPLOAD): ParsedImport {
   const text = typeof input === 'string' ? input : decode(input);
   const { headers, rows } = parseTable(text, [...URL_ALIASES, ...DOMAIN_ALIASES]);
   const urlCol = findCol(headers, URL_ALIASES);
@@ -122,13 +122,13 @@ export function parseProspects(input: Uint8Array | string, purpose: ImportPurpos
       if (prev.linkAttr !== 'dofollow' && row.linkAttr === 'dofollow') prev.linkAttr = 'dofollow';
       continue;
     }
-    if (byKey.size >= MAX_PER_UPLOAD) { overCap++; continue; }
+    if (byKey.size >= cap) { overCap++; continue; }
     byKey.set(row.urlKey, row);
   }
   const notes: string[] = [];
-  if (invalid) notes.push(`${invalid} rows had no usable URL and were skipped.`);
-  if (duplicatesInFile) notes.push(`${duplicatesInFile} duplicate rows for the same ${purpose === 'own_profile' ? 'domain' : 'page'} were merged.`);
-  if (overCap) notes.push(`Only the first ${MAX_PER_UPLOAD.toLocaleString('en-GB')} ${purpose === 'own_profile' ? 'domains' : 'pages'} were imported; ${overCap} more were left out.`);
+  if (invalid) notes.push(invalid === 1 ? '1 row had no usable URL and was skipped.' : `${invalid.toLocaleString('en-GB')} rows had no usable URL and were skipped.`);
+  if (duplicatesInFile) notes.push(`${duplicatesInFile.toLocaleString('en-GB')} duplicate ${duplicatesInFile === 1 ? 'row' : 'rows'} for the same ${purpose === 'own_profile' ? 'domain' : 'page'} ${duplicatesInFile === 1 ? 'was' : 'were'} merged.`);
+  if (overCap) notes.push(`Only the first ${cap.toLocaleString('en-GB')} ${purpose === 'own_profile' ? 'domains' : 'pages'} were imported; ${overCap} more were left out.`);
   return { kind, rows: [...byKey.values()], invalid, duplicatesInFile, overCap, notes };
 }
 

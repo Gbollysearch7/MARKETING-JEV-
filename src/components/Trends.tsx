@@ -57,8 +57,8 @@ export function ClicksTrend({ periods }: { periods: Period[] }) {
       <div className="flex h-36 items-end gap-3 border-b border-line" role="img" aria-label={points.map((p) => `${p.label}: ${p.value} clicks a month`).join('; ')}>
         {points.map((p, i) => (
           <div key={p.label} className="group relative flex h-full flex-1 flex-col justify-end">
-            <span className="absolute -top-0 left-1/2 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-inverse px-2 py-1 text-[11.5px] text-white opacity-0 transition-opacity group-hover:opacity-100">{fmt(p.value)} · {p.label}</span>
-            <div className="w-full rounded-t-[4px] transition-opacity group-hover:opacity-80" style={{ height: `${Math.max(3, (p.value / max) * 100)}%`, background: i === points.length - 1 ? 'var(--accent)' : p.derived ? 'repeating-linear-gradient(135deg, #c7d9cd 0 3px, #e3ece6 3px 6px)' : 'var(--chart-bar)' }} />
+            <span className="absolute -top-0 left-1/2 -translate-x-1/2 -translate-y-full hidden whitespace-nowrap rounded-md bg-inverse px-2 py-1 text-[11.5px] text-white group-hover:block">{fmt(p.value)} · {p.label}</span>
+            <div className="w-full rounded-t-[4px] transition-opacity group-hover:opacity-80" style={{ height: `${Math.max(3, (p.value / max) * 100)}%`, background: i === points.length - 1 ? 'var(--accent)' : p.derived ? 'repeating-linear-gradient(135deg, var(--chart-bar) 0 3px, transparent 3px 6px)' : 'var(--chart-bar)' }} />
           </div>
         ))}
       </div>

@@ -9,7 +9,7 @@ import { Bar, Delta, Tag, TEXT_TONE, healthTone, healthWord, type Tone } from '@
 import { UploadForm } from '@/components/local/UploadForm';
 import { providerInfo } from '@/lib/provider';
 import { clearLocalAction, loadLocalSamplesAction, runLocalAction, saveLocalSettingsAction } from '@/lib/modules/local-actions';
-import { getSettings, KIND_LABEL, latestLocalJob, listUploads, portfolio, readLog, runningLocalJob, snapshots, summarise } from '@/lib/modules/local';
+import { actionsSince, pendingDecisionCount, getSettings, KIND_LABEL, latestLocalJob, listUploads, portfolio, readLog, runningLocalJob, snapshots, summarise } from '@/lib/modules/local';
 import { reviewPeriods } from '@/modules/local/health';
 import { CRITERIA_VERSION } from '@/modules/local/battery';
 
@@ -30,6 +30,8 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
   const live = providerInfo().live;
   const has = p.locations.length > 0;
   const showAll = sp.all === '1';
+  // The weekly run is never automatic; the button says how many Jev decisions it will use.
+  const pending = has && !running ? pendingDecisionCount(id) : 0;
 
   const avgHealth = has ? Math.round(p.locations.reduce((s, l) => s + l.health.score, 0) / p.locations.length) : 0;
   const awaiting = p.locations.reduce((s, l) => s + l.unreplied, 0);
@@ -38,7 +40,15 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
   const tier1 = p.locations.reduce((s, l) => s + l.issues.filter((i) => i.tier === 1).length, 0);
   const openQs = p.locations.reduce((s, l) => s + l.openQuestions, 0);
   const weakest = [...p.locations].sort((a, b) => a.health.score - b.health.score);
-  const attention = showAll ? p.attention : p.attention.slice(0, 12);
+  const kinds = ['review', 'question', 'post', 'profile', 'citation'] as const;
+  const kind = sp.k && (kinds as readonly string[]).includes(sp.k) ? sp.k : null;
+  const kindCount = Object.fromEntries(kinds.map((k) => [k, p.attention.filter((a) => a.kind === k).length])) as Record<string, number>;
+  const pool = kind ? p.attention.filter((a) => a.kind === kind) : p.attention;
+  const attention = showAll ? pool : pool.slice(0, 12);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const monday = new Date(Date.parse(todayIso) - ((new Date(todayIso).getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
+  const doneThisWeek = has ? actionsSince(id, monday) : 0;
+  const kq = (k: string | null, all = showAll) => { const q = new URLSearchParams(); if (k) q.set('k', k); if (all) q.set('all', '1'); const s2 = q.toString(); return `${base}${s2 ? `?${s2}` : ''}`; };
   const allReviews = p.locations.flatMap((l) => l.reviews.map((r) => r.review));
   const periods = reviewPeriods(allReviews, new Date().toISOString().slice(0, 10));
   const maxCount = Math.max(1, ...periods.map((x) => x.count));
@@ -58,7 +68,7 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
             <a href="#data" className="btn h-11">Update data</a>
             <form action={runLocalAction} className="flex items-center gap-2">
               <input type="hidden" name="siteId" value={id} />
-              <SubmitButton className="btn btn-primary h-11" pending="Starting…" disabled={Boolean(running)}>{job ? 'Run this week again' : 'Run this week’s decisions'}</SubmitButton>
+              <SubmitButton className="btn btn-primary h-11" pending="Starting…" disabled={Boolean(running)}>{job ? 'Run this week again' : 'Run this week’s decisions'}{pending > 200 ? ` (about ${fmt(pending)} Jev decisions)` : ''}</SubmitButton>
             </form>
           </>
         ) : (
@@ -67,6 +77,7 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
       />
 
       <div className="-mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted">
+        {pending > 0 && <span>Next run: about {fmt(pending)} Jev decision{pending === 1 ? '' : 's'}</span>}
         {job ? <span>Last run {fmtDateTime(job.finished_at)} · {job.provider === 'mock' ? 'mock decisions (no API key)' : job.model} · {job.message}</span> : <span>Not run yet{has ? '' : ' · no locations uploaded'}</span>}
         <span className="mono">criteria {CRITERIA_VERSION}</span>
         {!live && <span className="text-warn">Offline mock in use: set TYPESAFE_API_KEY for live Jev.</span>}
@@ -84,7 +95,7 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
       ) : (
         <>
           <section aria-label="Portfolio at a glance" className="grid grid-cols-[repeat(auto-fit,minmax(min(170px,100%),1fr))] gap-3">
-            <Tile label="Locations" value={fmt(p.locations.length)} sub={p.orphanReviews ? `${p.orphanReviews} reviews match no location id` : `${fmt(p.counts.reviews)} reviews on file`} />
+            <Tile label="Locations" value={fmt(p.locations.length)} sub={p.orphanReviews ? `${fmt(p.orphanReviews)} review${p.orphanReviews === 1 ? ' matches' : 's match'} no location id` : `${fmt(p.counts.reviews)} reviews on file`} />
             <Tile label="Average health" value={<span className={TEXT_TONE[healthTone(avgHealth)]}>{avgHealth}</span>} sub={`${weakest.filter((l) => l.health.score < 60).length} at risk, out of 100`} />
             <Tile label="Reviews awaiting reply" value={fmt(awaiting)} sub={awaitingLow ? `${awaitingLow} at 1 to 2 stars` : 'none at 1 to 2 stars'} />
             <Tile label="Citation issues" value={fmt(issues)} sub={`${tier1} on Google, Apple or Bing`} />
@@ -92,7 +103,17 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
           </section>
 
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(440px,100%),1fr))] items-start gap-5">
-            <Section title="This week’s attention list" sub="Across every shop. Lowest health and most urgent first." actions={p.attention.length > 12 ? <Link className="text-[13px] font-semibold text-accent" href={showAll ? base : `${base}?all=1`}>{showAll ? 'Show top 12' : `Show all ${p.attention.length}`}</Link> : null}>
+            <Section title="This week’s attention list" sub={`Across every shop, most urgent first. ${doneThisWeek ? `${fmt(doneThisWeek)} action${doneThisWeek === 1 ? '' : 's'} done since Monday.` : 'Nothing actioned yet this week.'}`} actions={pool.length > 12 ? <Link className="text-[13px] font-semibold text-accent" href={kq(kind, !showAll)}>{showAll ? 'Show top 12' : `Show all ${fmt(pool.length)}`}</Link> : null}>
+              {p.attention.length > 0 && (
+                <nav aria-label="Filter the attention list" className="flex flex-wrap gap-1.5 border-b border-line px-4 py-3 sm:px-6">
+                  {[null, ...kinds].filter((k) => !k || kindCount[k]).map((k) => (
+                    <Link key={k ?? 'all'} href={kq(k, false)} aria-current={kind === k ? 'true' : undefined}
+                      className={`rounded-full border px-3 py-1 text-[12.5px] ${kind === k ? 'border-[var(--primary)] bg-[var(--primary)] font-semibold text-[var(--primary-fg)]' : 'border-line bg-surface text-ink-2 hover:border-line-strong'}`}>
+                      {k ? `${KIND_ICON[k]}s` : 'Everything'} · {fmt(k ? kindCount[k] : p.attention.length)}
+                    </Link>
+                  ))}
+                </nav>
+              )}
               {attention.length === 0 ? <Empty title="Nothing needs attention">Every review, question and listing is in order.</Empty> : (
                 <ol className="flex flex-col">
                   {attention.map((a, i) => (
@@ -234,7 +255,7 @@ export default async function LocalPage({ params, searchParams }: PageProps<'/si
               <tbody>
                 {uploads.map((u) => (
                   <tr key={u.id}>
-                    <td className="max-w-[260px]"><span className="block truncate" title={u.filename}>{u.filename}</span>{u.warnings.length > 0 && <details className="text-[12px] text-warn"><summary className="cursor-pointer">{u.warnings.length} row{u.warnings.length === 1 ? '' : 's'} skipped</summary>{u.warnings.slice(0, 8).map((w) => <div key={w}>{w}</div>)}</details>}</td>
+                    <td className="max-w-[260px]"><span className="block truncate" title={u.filename}>{u.filename}</span>{u.warnings.length > 0 && <details className="text-[12px] text-warn"><summary className="cursor-pointer">{u.warnings.length} row{u.warnings.length === 1 ? '' : 's'} to check</summary>{u.warnings.slice(0, 8).map((w) => <div key={w}>{w}</div>)}</details>}</td>
                     <td>{KIND_LABEL[u.kind]} <span className="text-muted">· {u.mode === 'replace' ? 'replaced' : 'added'}</span>{u.source === 'sample' && <span className="ml-2 rounded bg-sunken px-1.5 text-[11px] text-muted">sample</span>}</td>
                     <td className="r num">{fmt(u.row_count)}</td>
                     <td className="whitespace-nowrap text-muted">{fmtDateTime(u.created_at)}</td>

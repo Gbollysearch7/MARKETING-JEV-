@@ -35,6 +35,8 @@ export interface CodeChecks {
   duplicateRatio: number;
   duplicateOf: string | null;
   duplicateSource: 'batch' | 'site' | null;
+  /** Other pages in this batch sharing over 90% of phrasing with this one (absent on rows scored before it existed). */
+  duplicateGroup?: number;
   placeholders: string[];
   duplicateTitleWith: number;
   duplicateH1With: number;

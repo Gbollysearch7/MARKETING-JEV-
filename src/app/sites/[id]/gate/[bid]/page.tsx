@@ -24,7 +24,7 @@ export default async function Batch({ params, searchParams }: PageProps<'/sites/
   const running = batch.status === 'running' || batch.status === 'queued';
   const flagged = indexedWithoutImpressions(id, batch);
   const filter = { verdict: sp.verdict, template: sp.template, q: sp.q, flag: sp.flag };
-  const rows = listGatePages(batch.id, filter, flagged);
+  const rows = listGatePages(batch.id, filter, flagged, true);
   const all = batch.counts.index + batch.counts.improve + batch.counts.kill;
   const tpls = batchTemplates(batch.id);
   const base = `/sites/${id}/gate/${batch.id}`;
@@ -158,7 +158,7 @@ export default async function Batch({ params, searchParams }: PageProps<'/sites/
           ) : (
             <div className="overflow-x-auto">
               <table className={`tbl ${selected ? 'min-w-[600px]' : 'min-w-[720px]'}`}>
-                <thead><tr><th>Page</th><th>Verdict</th><th className="r">Confidence</th><th>Strongest reason</th></tr></thead>
+                <thead><tr><th>Page</th><th>Verdict</th><th className="r">Confidence</th><th>Strongest reason and first fix</th></tr></thead>
                 <tbody>
                   {rows.map((r) => {
                     const on = r.id === selected?.id;
@@ -171,7 +171,10 @@ export default async function Batch({ params, searchParams }: PageProps<'/sites/
                         </td>
                         <td><GateBadge v={r.verdict} size="sm" /></td>
                         <td className="r num">{r.verdict ? (r.model === 'rules' ? <span className="text-[12.5px] text-muted">Rule</span> : r.confidence.toFixed(2)) : '—'}</td>
-                        <td className="text-[13.5px] text-ink-2">{r.reasons[0] ?? <span className="text-faint">—</span>}</td>
+                        <td className="text-[13.5px] text-ink-2">
+                          {r.reasons[0] ?? <span className="text-faint">—</span>}
+                          {r.verdict && r.verdict !== 'index' && r.fixes[0] && <span className="mt-0.5 block text-[12.5px] text-muted"><span className="font-medium text-ink-2">Fix:</span> {r.fixes[0]}</span>}
+                        </td>
                       </tr>
                     );
                   })}

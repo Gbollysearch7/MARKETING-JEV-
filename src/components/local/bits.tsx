@@ -44,3 +44,13 @@ export function Delta({ v, digits = 0, suffix = '' }: { v: number | null; digits
   if (r === 0) return <span className="num text-muted">no change</span>;
   return <span className={`num ${r > 0 ? 'text-ok' : 'text-bad'}`}>{r > 0 ? '+' : '−'}{Math.abs(r).toFixed(digits)}{suffix}</span>;
 }
+
+/**
+ * How sure Jev was, in words. Deliberately not "Auto": in Local SEO nothing is posted automatically, and
+ * low-star replies always need a person whatever Jev's confidence.
+ */
+export function SureBadge({ r }: { r: 'auto' | 'review' | 'uncertain' | null }) {
+  if (!r) return null;
+  const [label, cls] = r === 'auto' ? ['Jev confident', 'bg-ok-bg text-ok'] : r === 'review' ? ['Worth a check', 'bg-warn-bg text-warn'] : ['Jev unsure', 'bg-sunken text-muted'];
+  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-medium ${cls}`}>{label}</span>;
+}

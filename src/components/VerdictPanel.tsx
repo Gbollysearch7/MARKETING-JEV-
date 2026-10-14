@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import type { Verdict } from '@/engine/verdict/types';
 import type { Task, VerdictRow } from '@/lib/repo';
-import { VerdictReviewControls } from './VerdictReviewControls';
-import { fmt, Impact, ROUTER_LABEL, StatusBadge, VERDICT_LABEL } from './ui';
+import { ReopenControl, VerdictReviewControls } from './VerdictReviewControls';
+import { fmt, fmtDate, Impact, ROUTER_LABEL, StatusBadge, VERDICT_LABEL } from './ui';
 
 const BAND_LABEL: Record<string, string> = {
   monthly_clicks: 'Clicks a month', click_trend: 'Click trend', impression_trend: 'Impressions', average_position: 'Average position',
@@ -16,8 +16,10 @@ const routerStyle = (r: string | null) =>
   r === 'auto' ? 'border-solid text-accent-strong border-accent' : r === 'review' ? 'border-solid text-warn border-warn' : 'border-dashed text-leave border-line-strong';
 
 /** The evidence and the decision controls for one verdict. Used by the decision inbox. */
-export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
+export function VerdictPanel({ v, siteId, nouls, task, back, nextBack, earlier }: {
   v: VerdictRow;
+  /** The last human review of this URL in an earlier run, when the model now proposes something else. */
+  earlier?: { status: string; verdict: Verdict; reviewed_at: string | null } | null;
   siteId: string;
   nouls: { key: string; p: number }[];
   task: Task | null;
@@ -58,7 +60,7 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
         )}
         <div className="grid grid-cols-2 gap-4 pt-1 xl:grid-cols-3">
           <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Confidence in {VERDICT_LABEL[v.verdict!]}</span><span className="num display text-[32px] leading-none">{Math.round(v.probability * 100)}%</span></div>
-          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Clicks a month now</span><span className="num display text-[32px] leading-none">{fmt(v.monthly_clicks)}</span></div>
+          <div className="flex flex-col gap-0.5"><span className="text-[12px] text-muted">Clicks a month now</span>{v.bands?.monthly_clicks === 'unknown' ? <span className="pt-2 text-[13px] text-muted">No Search Console data</span> : <span className="num display text-[32px] leading-none">{fmt(v.monthly_clicks)}</span>}</div>
           <div className="col-span-2 flex flex-col gap-0.5 xl:col-span-1"><span className="text-[12px] text-muted">Monthly clicks: forecast at 90 days</span><span className="display text-[30px] leading-none"><Impact low={v.impact_low} high={v.impact_high} /></span></div>
         </div>
       </div>
@@ -78,15 +80,26 @@ export function VerdictPanel({ v, siteId, nouls, task, back, nextBack }: {
           )}
         <p className="text-[12px] text-muted">Confidence describes the recommended action, not the likelihood of gaining traffic. Forecasts are estimates.</p>
       </div>
+      {v.status === 'proposed' && earlier && (
+        <div className="border-t border-line bg-warn-bg px-5 py-3 text-[13px] text-warn sm:px-7">
+          You {earlier.status === 'rejected' ? 'rejected' : 'approved'} {VERDICT_LABEL[earlier.verdict]} for this page{earlier.reviewed_at ? ` on ${fmtDate(earlier.reviewed_at)}` : ''}. With the latest data the recommendation is now {VERDICT_LABEL[v.verdict!]}{v.target ? ` to ${v.target}` : ''}, so it is back for review.
+          {task && <> Its {VERDICT_LABEL[task.verdict]} task is still open; approving this will not add a second task.</>}
+        </div>
+      )}
       {v.status === 'proposed' ? (
         <VerdictReviewControls key={v.id} id={v.id} verdict={v.verdict!} alternative={second} target={v.target} back={nextBack} uncertain={v.router === 'uncertain'} />
       ) : (
         <div className="flex flex-wrap items-center gap-3 border-y border-line bg-surface-2 px-5 py-4 text-[13px] sm:px-7">
           <StatusBadge s={v.status} />
           {v.reviewed_by === 'auto' && <span className="text-muted">Automatically approved</span>}
-          {v.final_verdict && v.final_verdict !== v.verdict && <span className="text-muted">Changed from {VERDICT_LABEL[v.verdict!]}</span>}
+          {v.reviewed_by === 'carried' && <span className="text-muted">You reviewed this {v.reviewed_at ? `on ${fmtDate(v.reviewed_at)}` : 'earlier'}; the latest run proposes the same, so your review was kept</span>}
+          {v.reviewed_by === 'user' && v.reviewed_at && <span className="text-muted">Reviewed {fmtDate(v.reviewed_at)}</span>}
+          {v.final_verdict && v.final_verdict !== v.verdict && <span className="text-muted">Changed to {VERDICT_LABEL[v.final_verdict]} from {VERDICT_LABEL[v.verdict!]}</span>}
           {task && <Link className="font-semibold text-accent" href={`/sites/${siteId}/queue?t=${task.id}`}>Open the task</Link>}
-          <Link className="ml-auto text-muted underline" href={back}>Back to the list</Link>
+          <span className="ml-auto flex flex-wrap items-center gap-3">
+            <ReopenControl id={v.id} />
+            <Link className="text-muted underline" href={back}>Back to the list</Link>
+          </span>
         </div>
       )}
       <details className="rounded-b-2xl">

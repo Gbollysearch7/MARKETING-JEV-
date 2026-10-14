@@ -8,6 +8,7 @@ import { CannibalPill, GapPill, IntentBadge, StageText } from '@/components/keyw
 import { ImportPanel } from '@/components/keywords/ImportPanel';
 import { clusterViews, getInput, latestRun, runningRun, searchConsoleKeywords, type ClusterView } from '@/lib/modules/keywords';
 import { rerunKeywordsAction } from '@/lib/modules/keywords-actions';
+import { briefFromClusterAction } from '@/lib/modules/briefs-actions';
 import { INTENT_LABEL, INTENTS } from '@/modules/keywords/battery';
 import type { KeywordIntent } from '@/lib/modules/contracts';
 
@@ -161,7 +162,7 @@ export default async function Keywords({ params, searchParams }: PageProps<'/sit
                         <td className="text-[13.5px]"><StageText stage={c.stage} /></td>
                         <td className="max-w-[320px]">
                           {c.kind === 'junk' ? <span className="text-[13px] text-muted">Not worth targeting</span>
-                            : c.gap ? <GapPill />
+                            : c.gap ? <span className="flex flex-wrap items-center gap-2"><GapPill /><form action={briefFromClusterAction} className="relative"><input type="hidden" name="siteId" value={id} /><input type="hidden" name="clusterId" value={c.id} /><SubmitButton className="btn btn-sm h-7" pending="…">Brief<span className="sr-only"> for {c.name}</span></SubmitButton></form></span>
                             : c.mappedPath ? <span className="mono break-all text-[13px]">{c.mappedPath}</span>
                             : <span className="text-faint">—</span>}
                           {c.cannibalised && <div className="mt-1"><Link href={`${base}/${c.id}#cannibalisation`}><CannibalPill n={c.alsoClaimedBy.length} /></Link></div>}

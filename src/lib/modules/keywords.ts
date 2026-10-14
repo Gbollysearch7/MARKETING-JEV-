@@ -8,7 +8,7 @@ import { buildQuestions, buildState, candidatePages, CRITERIA_VERSION, indexPage
 import { fromSearchConsole, type KeywordInput, type KeywordRow } from '@/modules/keywords/input';
 import { mockKeywordAnswer } from '@/modules/keywords/mock';
 import { isCannibalised, matchPrevious, readAnswers, rollup, ROUTER, type ClusterRollup, type ScoredKeyword } from '@/modules/keywords/rollup';
-import type { BuyingStage, KeywordCluster, KeywordIntent } from './contracts';
+import { INTERRUPTED, liveJobs, type BuyingStage, type KeywordCluster, type KeywordIntent } from './contracts';
 
 export const JOB_TYPE = 'keywords';
 const JUNK_NAME = 'Junk and off-topic';
@@ -110,7 +110,14 @@ function junkCluster(siteId: string): string {
 
 // ---------- the run ----------
 
-export function runningRun(siteId: string): Job | null { return runningJobOf(siteId, JOB_TYPE); }
+export function runningRun(siteId: string): Job | null {
+  const j = runningJobOf(siteId, JOB_TYPE);
+  if (j && !liveJobs.has(j.id)) {
+    db().prepare(`update jobs set status = 'failed', error = ?, message = ?, finished_at = ? where id = ? and status = 'running'`).run(INTERRUPTED, INTERRUPTED, now(), j.id);
+    return null;
+  }
+  return j;
+}
 export function latestRun(siteId: string): Job | null { return latestJobOf(siteId, JOB_TYPE); }
 
 /** Site pages for candidate matching, highest clicks first. */
@@ -126,7 +133,9 @@ export function startKeywordsRun(siteId: string, inputId: string): Job {
   if (!input || input.site_id !== siteId || !site) throw new Error('Keyword list not found');
   const rows = inputRows(inputId);
   const provider = getProvider(mockKeywordAnswer);
-  return startModuleJob(siteId, JOB_TYPE, provider, async (ctx) => {
+  const job = startModuleJob(siteId, JOB_TYPE, provider, async (ctx) => {
+    liveJobs.add(ctx.jobId);
+    try {
     const pages = sitePages(siteId);
     const ix = indexPages(pages);
     const summary = { name: site.name, domain: site.domain, topTitles: ix.pages.filter((p) => p.title).slice(0, 12).map(titleOf) };
@@ -156,7 +165,9 @@ export function startKeywordsRun(siteId: string, inputId: string): Job {
     })();
     const n = new Set(assigned).size;
     return `Clustered ${rows.length.toLocaleString('en-GB')} keywords into ${n.toLocaleString('en-GB')} clusters${failed ? ` (${failed} could not be scored)` : ''}`;
+    } finally { liveJobs.delete(ctx.jobId); }
   }, { inputId, count: rows.length });
+  return job;
 }
 
 /**
@@ -182,10 +193,21 @@ function assignClusters(siteId: string, scored: ScoredKeyword[]): string[] {
   const useful = usefulIdx.map((i) => scored[i]);
   const groups = clusterKeywords(useful);
   const matched = matchPrevious(groups.map((g) => g.map((j) => useful[j].keyword)), previous);
+  // Several new groups may share one previous id only when the user merged clusters into it. Otherwise the largest
+  // group keeps the id (and name) and the others become new clusters, so better clustering can split old groups.
+  const mergeTargets = new Set([...rows.values()].filter((r) => r.merged_into).map((r) => resolve(r.merged_into!)));
+  const largest = new Map<string, number>();
+  matched.forEach((id, gi) => { if (id && (!largest.has(id) || groups[gi].length > groups[largest.get(id)!].length)) largest.set(id, gi); });
+  matched.forEach((id, gi) => { if (id && !mergeTargets.has(id) && largest.get(id) !== gi) matched[gi] = null; });
+  const reused = new Map<string, ScoredKeyword[]>();
   groups.forEach((g, gi) => {
     const id = matched[gi] ?? createCluster(siteId, clusterName(g.map((j) => useful[j])));
+    if (matched[gi]) reused.set(id, [...(reused.get(id) ?? []), ...g.map((j) => useful[j])]);
     for (const j of g) out[usefulIdx[j]] = id;
   });
+  // Auto names follow the cluster's current keywords; names the user typed are kept.
+  const rename = db().prepare('update keywords_clusters set name = ? where id = ? and renamed = 0');
+  for (const [id, kws] of reused) rename.run(clusterName(kws), id);
   const overrides = db().prepare('select keyword, cluster_id from keywords_overrides where site_id = ?').all(siteId) as { keyword: string; cluster_id: string }[];
   if (overrides.length) {
     const live = clusterRows(siteId);

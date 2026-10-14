@@ -19,7 +19,7 @@ export function ApiKeysSection({ viewer, notice }: { viewer: Viewer; notice?: st
       <div>
         <h2 className="font-semibold">API keys</h2>
         <p className="text-[13px] text-muted">
-          For the Quality gate API, the WordPress plugin and build pipelines. Keys belong to the account, work for all its sites, and are limited to {RATE_LIMIT.requests} requests a minute each. Scoring stops when the plan is not active. See <span className="mono">docs/API.md</span>.
+          For the Quality gate API, the WordPress plugin and build pipelines. Keys belong to the account, work for all its sites, and are limited to {RATE_LIMIT.requests} requests a minute each. Scoring stops when the plan is not active. Request examples are on each site’s Quality gate page, under API.
         </p>
       </div>
       {notice && <p role="status" className="rounded-lg bg-ok-bg px-3 py-2 text-[13.5px] text-ok">{notice}</p>}

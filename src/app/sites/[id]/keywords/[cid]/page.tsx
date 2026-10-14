@@ -7,6 +7,7 @@ import { fmt } from '@/components/ui';
 import { CannibalPill, Conf, GapPill, IntentBadge, StageText } from '@/components/keywords/badges';
 import { clusterViews, getInput, latestRun } from '@/lib/modules/keywords';
 import { mergeClustersAction, moveKeywordAction, renameClusterAction } from '@/lib/modules/keywords-actions';
+import { briefFromClusterAction } from '@/lib/modules/briefs-actions';
 import { INTENT_LABEL, STAGE_LABEL } from '@/modules/keywords/battery';
 
 const MOVE_OPTIONS = 150;
@@ -57,12 +58,14 @@ export default async function ClusterDetail({ params, searchParams }: { params: 
           ) : c.gap ? (
             <>
               <div><GapPill /></div>
-              <p className="text-[14px] text-ink-2">Most keywords here chose “no existing page is a good home”. {c.intent ? `A new ${INTENT_LABEL[c.intent].toLowerCase()} page` : "A new page"} would serve this cluster. Gap clusters are passed to the <Link className="underline" href={`/sites/${id}/briefs`}>Brief desk</Link> as brief candidates.</p>
+              <p className="text-[14px] text-ink-2">Most keywords here chose “no existing page is a good home”. {c.intent ? `A new ${INTENT_LABEL[c.intent].toLowerCase()} page` : "A new page"} would serve this cluster.</p>
+              <BriefButton siteId={id} clusterId={c.id} primary />
             </>
           ) : c.mappedPath ? (
             <>
               <a href={url(c.mappedPath)} target="_blank" rel="noreferrer" className="mono break-all text-[15px] font-medium hover:underline">{c.mappedPath}</a>
-              <p className="text-[13px] text-muted">Chosen by the majority of this cluster&apos;s keywords.</p>
+              <p className="text-[13px] text-muted">Chosen by the majority of this cluster&apos;s keywords. To plan new or expanded content for it, Jev decides whether to expand this page or write another.</p>
+              <BriefButton siteId={id} clusterId={c.id} />
             </>
           ) : <p className="text-muted">No pages were available to map. Add a crawl or Search Console data on <Link className="underline" href={`/sites/${id}/data`}>Data sources</Link> and re-run.</p>}
         </section>
@@ -176,5 +179,16 @@ export default async function ClusterDetail({ params, searchParams }: { params: 
         </div>
       </section>
     </div>
+  );
+}
+
+/** One click from a cluster to the brief desk: the cluster becomes a target and is decided straight away. */
+function BriefButton({ siteId, clusterId, primary }: { siteId: string; clusterId: string; primary?: boolean }) {
+  return (
+    <form action={briefFromClusterAction} className="mt-1">
+      <input type="hidden" name="siteId" value={siteId} />
+      <input type="hidden" name="clusterId" value={clusterId} />
+      <SubmitButton className={`btn ${primary ? 'btn-primary' : ''} h-10`} pending="Creating…">Create a brief</SubmitButton>
+    </form>
   );
 }

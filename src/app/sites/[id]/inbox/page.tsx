@@ -5,6 +5,7 @@ import { InboxKeys } from '@/components/InboxKeys';
 import { Toast } from '@/components/Toast';
 import { VerdictPanel } from '@/components/VerdictPanel';
 import { Empty, Impact, qs, VERDICT_LABEL } from '@/components/ui';
+import { db } from '@/lib/db';
 import { decisionsForPath, getVerdict, latestVerdictJob, listVerdicts, openTaskForPath, templates, type VerdictFilter } from '@/lib/repo';
 
 const SIZE = 40;
@@ -64,13 +65,17 @@ export default async function Inbox({ params, searchParams }: PageProps<'/sites/
   const dv = sp.dv && VERDICTS.includes(sp.dv as Verdict) ? VERDICT_LABEL[sp.dv as Verdict] : '';
   const toast = sp.done && DONE[sp.done] ? `${DONE[sp.done]} ${dv}${show === 'waiting' || show === 'review' || show === 'uncertain' || show === 'irreversible' ? ` · ${total.toLocaleString('en-GB')} left` : ''}` : null;
   const nextBack = `${base}${qs(keep, { v: next?.id })}`;
+  const earlier = selected && selected.status === 'proposed'
+    ? (db().prepare(`select status, coalesce(final_verdict, verdict) verdict, reviewed_at from verdicts where site_id = ? and path = ? and job_id != ? and reviewed_by in ('user', 'carried') and status != 'proposed' order by reviewed_at desc limit 1`)
+      .get(id, selected.path, selected.job_id) as { status: string; verdict: Verdict; reviewed_at: string | null } | undefined) ?? null
+    : null;
   const nouls = selected
     ? decisionsForPath(selected.job_id, selected.path).filter((d) => d.answer.type === 'noul').map((d) => ({ key: d.question_key, p: Number(d.answer.noul) }))
     : [];
 
   return (
     <div className="flex flex-col gap-5">
-      {toast && <Toast key={`${sp.done}-${sp.v}`} message={toast} tone={sp.done === 'reject' ? 'bad' : 'ok'} />}
+      {toast && <Toast key={`${sp.done}-${sp.v}-${sp.rv}`} message={toast} tone={sp.done === 'reject' ? 'bad' : 'ok'} link={sp.rv ? { href: `${base}${qs({ show: 'all' }, { v: sp.rv })}`, label: 'Undo' } : undefined} />}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="display text-[40px] leading-[1.05]">Decision inbox</h1>
@@ -164,7 +169,7 @@ export default async function Inbox({ params, searchParams }: PageProps<'/sites/
                 {after && <Link className="btn btn-sm" href={`${base}${qs(keep, { v: after.id })}`}>Next</Link>}
               </span>
             </nav>
-            {selected && <VerdictPanel key={selected.id} v={selected} siteId={id} nouls={nouls} task={openTaskForPath(id, selected.path)} back={back} nextBack={nextBack} />}
+            {selected && <VerdictPanel key={selected.id} v={selected} siteId={id} nouls={nouls} task={openTaskForPath(id, selected.path)} back={back} nextBack={nextBack} earlier={earlier} />}
           </div>
         </div>
       )}

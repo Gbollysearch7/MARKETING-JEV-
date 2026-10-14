@@ -1,5 +1,5 @@
 import { COMPLETE_ANGLE } from './battery';
-import { headTerm, isQuestion, modifiersOf, normKw, proper, sentence, similarity } from './text';
+import { headTerm, isQuestion, modifiersOf, normKw, proper, sentence, similarity, topicTokens } from './text';
 import type { AngleOption, BriefContent, Coverage, Edge, Format, Go, Intent, Length, LinkSuggestion, OutlineSection, SiteFacts, TargetData } from './types';
 
 /** Brief assembly. Everything here is templates over data and Jev's closed-set choices. No generated prose. */
@@ -92,13 +92,19 @@ const ANGLE_SECTION: Record<string, (t: string) => { h2: string; note: string }>
   expert_tested: () => ({ h2: 'How we tested', note: 'Who tested, where, for how long and in what conditions. Only include testing that really happened.' }),
 };
 
+/** Sections before the closing "Common questions" and "Where to go next". */
+const MAX_BODY_SECTIONS = 10;
+
 /** Ordered H2s with the queries each must answer, built from the target's keywords, the format and the angle. */
 export function buildOutline(t: TargetData, format: Format, angle: string): OutlineSection[] {
   const topic = topicOf(t);
   const kws = t.keywords.map((k) => normKw(k.keyword));
   const used = new Set<string>();
   const out: OutlineSection[] = [];
-  const open = OPENING[format](topic, proper(normKw(t.primary)));
+  const primaryQ = isQuestion(t.primary);
+  const open = format === 'guide' && primaryQ
+    ? { h2: /^how to\b/.test(normKw(t.primary)) ? `${sentence(normKw(t.primary))}: the short answer` : `${sentence(normKw(t.primary))}? The short answer`, note: OPENING.guide(topic, '').note }
+    : OPENING[format](topic, proper(normKw(t.primary)));
   out.push({ ...open, answers: [normKw(t.primary)] });
   used.add(normKw(t.primary));
 
@@ -126,10 +132,15 @@ export function buildOutline(t: TargetData, format: Format, angle: string): Outl
     for (const k of fresh) used.add(k);
   }
   if (ANGLE_SECTION[angle]) out.splice(1, 0, { ...ANGLE_SECTION[angle](topic), answers: [] });
-  const rest = kws.filter((k) => !used.has(k));
-  if (rest.length) out.push({ h2: 'Common questions', answers: rest.slice(0, 8), note: 'Cover each remaining search in a short paragraph.' });
-  if (format !== 'product_or_category') out.push({ h2: 'Where to go next', answers: [], note: 'Link to the pages under "Link to" in this brief.' });
-  return out.slice(0, 12);
+  // Cap the body at 10 sections; searches from sections that do not fit move to "Common questions", and the
+  // closing sections are always kept.
+  const body = out.slice(0, MAX_BODY_SECTIONS);
+  for (const s of out.slice(MAX_BODY_SECTIONS)) for (const a of s.answers) used.delete(a);
+  const kept = new Set(body.flatMap((s) => s.answers));
+  const rest = kws.filter((k) => !kept.has(k) && !used.has(k));
+  if (rest.length) body.push({ h2: 'Common questions', answers: rest.slice(0, 8), note: 'Cover each remaining search in a short paragraph.' });
+  if (format !== 'product_or_category') body.push({ h2: 'Where to go next', answers: [], note: 'Link to the pages under "Link to" in this brief.' });
+  return body;
 }
 
 /** "What makes this better than the top 3", phrased in code from Jev's closed-set edge choice. */
@@ -153,8 +164,11 @@ const SKIP_PATH = /^\/(about|contact|cookie|privacy|terms|basket|cart|checkout|l
 /** Internal links to and from, ranked by token similarity between the target's keywords and each page's path and title. */
 export function linkSuggestions(t: TargetData, pages: SitePage[], self: string | null, preferProducts: boolean): { to: LinkSuggestion[]; from: LinkSuggestion[] } {
   const text = t.keywords.map((k) => k.keyword).join(' ');
+  // A related page must share a word of the topic itself ("harness"), not just a qualifier ("waterproof", "hiking").
+  const head = new Set(topicTokens(headTerm(t.primary) || t.primary));
   const scored = pages
     .filter((p) => p.path !== self && p.path !== '/' && !SKIP_PATH.test(p.path))
+    .filter((p) => !head.size || topicTokens(`${p.path.replace(/[/-]/g, ' ')} ${p.title ?? ''}`).some((x) => head.has(x)))
     .map((p) => ({ p, s: similarity(text, `${p.path.replace(/[/-]/g, ' ')} ${p.title ?? ''}`) }))
     .filter((x) => x.s > 0);
   const isProduct = (p: SitePage) => /^\/(products?|shop|category|categories|collections?)\b/.test(p.path);
@@ -212,6 +226,8 @@ export function assembleBrief(input: {
     linksTo: links.to,
     linksFrom: links.from,
     sources: sourceSuggestions(t, edge, input.sourceFacts),
+    expandPath: input.go === 'expand_existing' ? input.coverage.path : null,
+    expandTitle: input.go === 'expand_existing' ? input.coverage.title : null,
   };
 }
 
@@ -238,6 +254,7 @@ export function briefMarkdown(b: BriefContent, meta: { primary: string; go: Go; 
   const L: string[] = [];
   L.push(`# ${b.title}`, '');
   L.push(`- **Site:** ${meta.site}`, `- **Primary keyword:** ${meta.primary}`, `- **Action:** ${GO_LABEL[meta.go]}`, `- **Format:** ${FORMAT_LABEL[b.format]}`, `- **Angle:** ${b.angleLabel}`, `- **Length:** ${LENGTH_LABEL[b.length]}`, `- **Status:** ${meta.status}`);
+  if (meta.go === 'expand_existing' && b.expandPath) L.push(`- **Expand this page:** ${b.expandPath}${b.expandTitle ? ` (${b.expandTitle})` : ''}. Add the sections below to it rather than publishing a new URL.`);
   if (meta.publishedUrl) L.push(`- **Published URL:** ${meta.publishedUrl}`);
   L.push('', '## Title options', ...b.titleOptions.map((t, i) => `${i + 1}. ${t}`));
   L.push('', '## Better than the top 3 because', b.edgeLine);

@@ -65,6 +65,14 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
 
       <Onboarding siteId={id} hasData={hasData} scored={Boolean(job)} reviewed={reviewed} taskDone={taskDone} />
       {running && <JobProgress key={running.id} jobId={running.id} initial={running} label={running.type === 'crawl' ? 'Crawling the sitemap' : 'Scoring every URL'} />}
+      {!running && history[0]?.status === 'failed' && (
+        <div role="alert" className="rounded-xl bg-bad-bg px-4 py-3 text-[13.5px] text-bad">
+          <span className="font-semibold">The scoring run started {fmtDateTime(history[0].created_at)} did not finish.</span> {history[0].error} {job ? 'The results below are from the last complete run.' : ''}
+        </div>
+      )}
+      {job && !running && Array.isArray(job.meta.notes) && (job.meta.notes as string[]).length > 0 && (
+        <div className="flex flex-col gap-1 rounded-xl bg-warn-bg px-4 py-3 text-[13px] text-warn">{(job.meta.notes as string[]).map((n) => <span key={n}>{n}</span>)}</div>
+      )}
       {hasData && missing.length > 0 && (
         <div className="rounded-xl bg-sunken px-4 py-3 text-[13px] text-ink-2">Verdicts get sharper with {missing.join(', ')}. <Link className="font-semibold text-accent" href={`/sites/${id}/data`}>Add them</Link></div>
       )}
@@ -123,7 +131,7 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] gap-5">
             <section aria-label="Organic clicks over time" className="card flex flex-col gap-4 p-6">
               <div><h2 className="text-[16px] font-semibold">Organic clicks</h2><p className="text-[13px] text-muted">From each Search Console upload, per month.</p></div>
-              {periods.length ? <ClicksTrend periods={periods} /> : <p className="py-6 text-muted">Upload a Search Console export with a date range to start the trend.</p>}
+              {periods.length ? <ClicksTrend periods={periods.slice(-12)} /> : <p className="py-6 text-muted">Upload a Search Console export with a date range to start the trend.</p>}
               {periods.length === 1 && <p className="text-[12.5px] text-muted">Upload next month&apos;s export to extend the line.</p>}
             </section>
             <section aria-label="Verdict mix over time" className="card flex flex-col gap-4 p-6">
@@ -142,7 +150,7 @@ export default async function Overview({ params }: PageProps<'/sites/[id]'>) {
               <div className="flex flex-col"><span className="num display text-[44px] leading-none">{outCount('neutral')}</span><span className="text-[12.5px] text-[#cfc9bc]">neutral</span></div>
               <div className="flex flex-col"><span className="num display text-[44px] leading-none">{outCount('backfired')}</span><span className="text-[12.5px] text-[#ffb4ab]">backfired</span></div>
             </div>
-            <Link href={`/sites/${id}/outcomes`} className="btn h-11 border-[#f4f1ea] bg-[#f4f1ea] text-ink hover:bg-white">Open outcomes</Link>
+            <Link href={`/sites/${id}/outcomes`} className="btn h-11 border-[#f4f1ea] bg-[#f4f1ea] text-[#1d1b17] hover:bg-white">Open outcomes</Link>
           </section>
         </>
       )}

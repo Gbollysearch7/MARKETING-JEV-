@@ -2,10 +2,12 @@ import { requireSite } from '@/lib/auth';
 import Link from 'next/link';
 import type { Verdict } from '@/engine/verdict/types';
 import { TaskEditor } from '@/components/TaskEditor';
-import { Empty, fmtDate, Impact, StatusBadge, VERDICT_LABEL } from '@/components/ui';
+import { Toast } from '@/components/Toast';
+import { BreakPath, Empty, fmtDate, Impact, StatusBadge, VERDICT_LABEL } from '@/components/ui';
 import { REDIRECT_FORMATS, redirectRules } from '@/lib/exports';
 import { listTasks, outcomesForTask, type Task } from '@/lib/repo';
 
+const DONE_SHOWN = 25;
 const COLUMNS: { key: Task['status']; label: string; empty: string }[] = [
   { key: 'todo', label: 'To do', empty: 'Approved decisions land here.' },
   { key: 'in_progress', label: 'In progress', empty: 'Move a task here when work starts.' },
@@ -31,6 +33,7 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
 
   return (
     <div className="flex flex-col gap-5">
+      {sp.saved && selected && <Toast key={`${sp.t}-${sp.saved}`} message={selected.status === 'done' ? 'Saved. The outcome is measured from each later Search Console upload.' : selected.status === 'cancelled' ? 'Task cancelled' : 'Task saved'} />}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex max-w-[720px] flex-col gap-1">
           <h1 className="display text-[40px] leading-[1.05]">Work queue</h1>
@@ -59,10 +62,13 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
             <div role="region" aria-label="Task board" tabIndex={0} className="overflow-x-auto pb-3">
             <div className="grid grid-cols-[repeat(3,minmax(220px,1fr))] items-start gap-3.5">
             {COLUMNS.map((c) => {
-              const items = all.filter((t) => t.status === c.key);
+              let items = all.filter((t) => t.status === c.key);
+              // Done tasks pile up over months; show the most recent unless asked for all.
+              const hiddenDone = c.key === 'done' && sp.done !== 'all' ? Math.max(0, items.length - DONE_SHOWN) : 0;
+              if (c.key === 'done') items = [...items].sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? '')).slice(0, hiddenDone ? DONE_SHOWN : undefined);
               return (
                 <section key={c.key} aria-label={c.label} className="flex max-h-[65vh] flex-col gap-2.5 overflow-y-auto xl:max-h-[calc(100vh-220px)]">
-                  <h2 className="flex justify-between px-1 text-[13px] font-semibold text-ink-2">{c.label}<span className="mono text-muted">{items.length}</span></h2>
+                  <h2 className="flex justify-between px-1 text-[13px] font-semibold text-ink-2">{c.label}<span className="mono text-muted">{items.length + hiddenDone}</span></h2>
                   {items.length === 0 && <div className="rounded-xl border border-dashed border-line-strong px-3.5 py-5 text-center text-[13px] text-muted">{c.empty}</div>}
                   {items.map((t) => {
                     const on = t.id === selected?.id;
@@ -70,7 +76,7 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
                       <Link key={t.id} href={`${base}?t=${t.id}`} aria-current={on ? 'true' : undefined}
                         className={`flex flex-col gap-2.5 rounded-xl bg-surface p-3.5 ${on ? 'border-2 border-accent' : 'border border-line hover:border-line-strong'}`}>
                         <Badge v={t.verdict} />
-                        <span className="mono break-all text-[13px]">{t.path}</span>
+                        <span className="mono text-[13px] [overflow-wrap:anywhere]" title={t.path}><BreakPath path={t.path} /></span>
                         <span className="flex justify-between gap-2 text-[12.5px] text-muted">
                           <span className="min-w-0 break-words">{t.owner || 'Unassigned'}{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ''}</span>
                           <span className="mono flex-none whitespace-nowrap text-ink-2"><Impact low={t.forecast_low} high={t.forecast_high} /></span>
@@ -78,6 +84,7 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
                       </Link>
                     );
                   })}
+                  {hiddenDone > 0 && <Link href={`${base}?done=all`} className="px-1 text-[12.5px] text-muted underline">Show {hiddenDone} older done {hiddenDone === 1 ? 'task' : 'tasks'}</Link>}
                 </section>
               );
             })}
@@ -91,12 +98,12 @@ export default async function Queue({ params, searchParams }: PageProps<'/sites/
               <Link href={base} className="border-b border-line px-5 py-3 font-medium text-accent xl:hidden">← Back to the task board</Link>
               <div className="flex flex-col gap-2.5 border-b border-line px-6 py-5">
                 <div className="flex items-center justify-between gap-2"><Badge v={selected.verdict} /><StatusBadge s={selected.status} /></div>
-                <h2 className="mono break-all text-[18px] font-medium">{selected.path}</h2>
-                {selected.target && <div className="mono text-[13px] text-muted">→ {selected.target}</div>}
+                <h2 className="mono text-[18px] font-medium [overflow-wrap:anywhere]"><BreakPath path={selected.path} /></h2>
+                {selected.target && <div className="mono text-[13px] text-muted [overflow-wrap:anywhere]">→ <BreakPath path={selected.target} /></div>}
                 <p className="text-ink-2">{selected.brief.summary}</p>
                 <div className="text-[13px] text-muted">Expected <span className="font-medium text-ink"><Impact low={selected.forecast_low} high={selected.forecast_high} /></span> clicks a month in 90 days</div>
               </div>
-              <TaskEditor key={selected.id} task={selected} today={today} />
+              <TaskEditor key={selected.id} task={selected} today={today} back={`${base}?t=${selected.id}&saved=1`} />
               <div className="flex flex-col gap-2.5 border-b border-line px-6 py-4">
                 <h3 className="text-[13px] font-semibold text-muted">Checklist</h3>
                 <ol className="flex list-decimal flex-col gap-1.5 pl-5">{selected.brief.checklist.map((c) => <li key={c}>{c}</li>)}</ol>

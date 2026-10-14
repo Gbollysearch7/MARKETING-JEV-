@@ -1,5 +1,5 @@
 import { getViewer, siteForRequest } from '@/lib/auth';
-import { importAnswersCsv, startAnalysis } from '@/lib/modules/visibility';
+import { autoAnalyse, importAnswersCsv } from '@/lib/modules/visibility';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -19,9 +19,12 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   if (!(file instanceof File) || file.size === 0) return back(`error=${encodeURIComponent('Choose a CSV file first.')}`);
   if (file.size > MAX_BYTES) return back(`error=${encodeURIComponent('That file is over 25 MB. Split it and upload the parts.')}`);
   try {
-    const res = importAnswersCsv(site, await file.text());
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Excel "Unicode text" and some tools save UTF-16 with a byte order mark.
+    const text = bytes[0] === 0xff && bytes[1] === 0xfe ? new TextDecoder('utf-16le').decode(bytes) : bytes[0] === 0xfe && bytes[1] === 0xff ? new TextDecoder('utf-16be').decode(bytes) : new TextDecoder('utf-8').decode(bytes);
+    const res = importAnswersCsv(site, text);
     const viewer = await getViewer();
-    if (res.added && viewer?.status.active) startAnalysis(site);
+    if (res.added && viewer?.status.active) autoAnalyse(site);
     const notes = res.notes.length ? `&notes=${encodeURIComponent(res.notes.join(' '))}` : '';
     return back(`done=imported&n=${res.added}&dup=${res.duplicates}${notes}`);
   } catch (err) {

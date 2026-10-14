@@ -6,7 +6,8 @@ import { VERDICTS, type Verdict } from '@/engine/verdict/types';
 import { checkCredentials, createAccountWithOwner, endSession, findUserByEmail, requireSite, requireViewer, startSession } from './auth';
 import { loadSamples } from './ingest';
 import { startCrawlJob, startVerdictJob } from './jobs';
-import { addLabel, createSite, deleteSite, deleteUpload, getTask, getVerdict, runningJob, setVerdictReview, updateTask } from './repo';
+import { addLabel, createSite, deleteSite, deleteUpload, getTask, getVerdict, reopenVerdict, runningJob, setVerdictReview, updateTask } from './repo';
+import { db } from './db';
 import { measureOutcomes, taskFromVerdict } from './tasks';
 import { reviewInputError, taskInputError } from './form-validation';
 import { hostOf } from '@/engine/ingest/url';
@@ -152,8 +153,9 @@ export async function startCrawlFormAction(_prev: FormState, formData: FormData)
 export async function runVerdictsAction(formData: FormData) {
   const { site, viewer } = await requireSite(str(formData.get('siteId')));
   if (!viewer.status.active) redirect('/billing');
-  if (runningJob(site.id)) throw new Error('A job is already running for this site');
-  startVerdictJob(site.id, viewer.status.urlLimit);
+  // A second click, a second tab or the back button: the run in progress is already shown on the Overview.
+  if (runningJob(site.id)) redirect(`/sites/${site.id}`);
+  try { startVerdictJob(site.id, viewer.status.urlLimit); } catch { redirect(`/sites/${site.id}/data`); }
   redirect(`/sites/${site.id}`);
 }
 
@@ -189,7 +191,7 @@ export async function reviewVerdictAction(formData: FormData) {
   if (back) {
     const target = safePath(back, `/sites/${v.site_id}/inbox`);
     const verdict = decision === 'change' ? str(formData.get('verdict')) : v.verdict;
-    redirect(`${target}${target.includes('?') ? '&' : '?'}done=${decision}&dv=${encodeURIComponent(verdict ?? '')}`);
+    redirect(`${target}${target.includes('?') ? '&' : '?'}done=${decision}&dv=${encodeURIComponent(verdict ?? '')}&rv=${v.id}`);
   }
 }
 
@@ -204,6 +206,27 @@ export async function reviewVerdictFormAction(_prev: FormState, formData: FormDa
   if (error) return { error };
   await reviewVerdictAction(formData);
   return { success: 'Decision saved.' };
+}
+
+/**
+ * Undo a review (for example an accidental "A"). The task it created is removed if work has not started on it,
+ * and a correction it saved to the decision log is withdrawn.
+ */
+export async function reopenVerdictFormAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const v = getVerdict(str(formData.get('verdictId')));
+  if (!v) return { error: 'This decision is no longer available. Reload the inbox.' };
+  await requireSite(v.site_id);
+  if (v.status === 'proposed') return { error: 'This decision is already waiting for review.' };
+  const d = db();
+  const started = d.prepare(`select status from tasks where verdict_id = ? and status in ('in_progress', 'done') limit 1`).get(v.id) as { status: string } | undefined;
+  if (started) return { error: `Its task is already ${started.status === 'done' ? 'done' : 'in progress'}. Change or cancel it in the work queue instead.` };
+  d.transaction(() => {
+    d.prepare(`delete from tasks where verdict_id = ? and status = 'todo'`).run(v.id);
+    d.prepare('delete from labels where verdict_id = ?').run(v.id);
+    reopenVerdict(v.id);
+  })();
+  revalidatePath(`/sites/${v.site_id}`, 'layout');
+  return { success: 'Review undone. The decision is waiting for you again.' };
 }
 
 // ---------- tasks and outcomes ----------
@@ -235,6 +258,9 @@ export async function updateTaskFormAction(_prev: FormState, formData: FormData)
   const error = taskInputError({ status: str(formData.get('status')), dueDate: str(formData.get('due_date')), doneAt: str(formData.get('done_at')) || task.done_at?.slice(0, 10) || '', today: new Date().toISOString().slice(0, 10) });
   if (error) return { error };
   await updateTaskAction(formData);
+  // Keep the saved task open (it may have moved column) and confirm with a toast.
+  const back = str(formData.get('back'));
+  if (back) redirect(safePath(back, `/sites/${task.site_id}/queue`));
   return { success: 'Task saved.' };
 }
 

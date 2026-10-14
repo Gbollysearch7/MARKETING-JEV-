@@ -1,5 +1,4 @@
-import { strFromU8 } from 'fflate';
-import { findCol, num, parseTable } from './csv';
+import { decodeText, findCol, num, parseTable } from './csv';
 import { isoDate } from './gsc';
 import { pathKey } from './url';
 
@@ -25,7 +24,7 @@ const URL_ALIASES = ['address', 'url', 'page url', 'full url'];
 
 /** Screaming Frog "Internal: HTML" export or a Sitebulb URL export. */
 export function importCrawlCsv(bytes: Uint8Array): CrawlImport {
-  const { headers, rows } = parseTable(strFromU8(bytes), URL_ALIASES);
+  const { headers, rows } = parseTable(decodeText(bytes), URL_ALIASES);
   const urlCol = findCol(headers, URL_ALIASES)!;
   const statusCol = findCol(headers, ['status code', 'http status code', 'http status']);
   const indexCol = findCol(headers, ['indexability', 'indexable']);

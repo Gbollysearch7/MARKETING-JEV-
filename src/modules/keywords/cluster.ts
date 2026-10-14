@@ -10,7 +10,16 @@ export const MODIFIERS = new Set([
   'best', 'top', 'cheap', 'cheapest', 'buy', 'uk', 'review', 'reviews', 'vs', 'versus', 'for', 'near', 'me', 'how', 'what', 'why', 'when', 'where', 'which',
   'guide', 'tips', 'sale', 'deal', 'deals', 'discount', 'price', 'prices', 'online', 'shop', 'store', 'new', 'good', 'women', 'womens', 'men', 'mens', 'kids',
   'beginner', 'beginners', 'choose', 'choosing', 'lightweight', 'budget', 'compare', 'comparison', '2026', '2025', 'should', 'need', 'get', 'use', 'using',
+  // Price, size, season and fit qualifiers ("under £100", "for wide feet", "4 season") describe a product, not a topic.
+  'under', 'over', 'code', 'voucher', 'coupon', 'offer', 'clearance', 'outlet', 'free', 'delivery', 'wide', 'narrow', 'feet', 'foot', 'size', 'sizing', 'chart',
+  'large', 'small', 'xl', 'season', 'winter', 'summer', 'spring', 'autumn', 'waterproof', 'ultralight', 'value', 'quality', 'uk', 'england', 'scotland', 'wales',
+  // Question and care verbs ("how long do … last", "how to clean …") are shared across every product.
+  'long', 'last', 'worth', 'much', 'many', 'often', 'fix', 'repair', 'clean', 'cleaning', 'wash', 'washing', 'reproof', 'reproofing', 'store', 'storing', 'dry', 'drying',
+  'mean', 'meaning', 'explained', 'difference', 'between', 'alternative', 'vs', 'like', 'way', 'ways', 'without', 'right', 'size',
 ]);
+
+/** A modifier word, or a number ("100", "4"): neither makes two keywords the same topic on its own. */
+export const isModifier = (t: string) => MODIFIERS.has(t) || /^\d+$/.test(t);
 
 /** Light stemming so "boots"/"boot" and "tents"/"tent" share a token. */
 export function stem(w: string): string {
@@ -38,7 +47,7 @@ export function buildIdf(docs: string[][]): Idf {
   const n = docs.length || 1;
   return (t: string) => {
     const base = Math.log(1 + n / (df.get(t) ?? 1));
-    return MODIFIERS.has(t) ? base * 0.25 : base;
+    return isModifier(t) ? base * 0.25 : base;
   };
 }
 
@@ -50,7 +59,7 @@ export function similarity(a: string[], b: string[], idf: Idf): number {
   for (const t of a) {
     const w = idf(t);
     union += w;
-    if (b.includes(t)) { shared += w; if (!MODIFIERS.has(t)) head = true; }
+    if (b.includes(t)) { shared += w; if (!isModifier(t)) head = true; }
   }
   for (const t of b) if (!a.includes(t)) union += idf(t);
   return head && union > 0 ? shared / union : 0;
@@ -72,7 +81,8 @@ function intentFactor(a?: string | null, b?: string | null): number {
   if (!a || !b || a === b) return 1;
   const buy = new Set(['commercial', 'transactional']);
   if (buy.has(a) && buy.has(b)) return 0.7;
-  return 0.5;
+  // Learning how to do something and buying it need different pages, even on the same product.
+  return 0.35;
 }
 
 /** Group keywords into topic clusters. Returns arrays of indexes into `items`. */
@@ -86,7 +96,7 @@ export function clusterKeywords(items: ClusterItem[], opts: ClusterOptions = {})
 
   // Sparse k-nearest-neighbour graph through an inverted index on head terms.
   const index = new Map<string, number[]>();
-  toks.forEach((ts, i) => { for (const t of ts) if (!MODIFIERS.has(t)) (index.get(t) ?? index.set(t, []).get(t)!).push(i); });
+  toks.forEach((ts, i) => { for (const t of ts) if (!isModifier(t)) (index.get(t) ?? index.set(t, []).get(t)!).push(i); });
   const edges: { i: number; j: number; s: number }[] = [];
   for (let i = 0; i < items.length; i++) {
     const seen = new Set<number>();
@@ -128,8 +138,24 @@ export function clusterKeywords(items: ClusterItem[], opts: ClusterOptions = {})
   return [...members.values()].map((m) => m.sort((x, y) => x - y));
 }
 
-/** The cluster's auto name: its highest-volume keyword (ties: the shortest, then alphabetical). */
+/**
+ * The cluster's auto name: its highest-volume keyword made only of words that most of the cluster shares, so a big
+ * "hiking boots" cluster is not named after "hiking boots leeds". Falls back to the highest-volume keyword
+ * (ties: the shortest, then alphabetical).
+ */
 export function clusterName(keywords: { keyword: string; volume: number | null }[]): string {
-  const best = [...keywords].sort((a, b) => (b.volume ?? -1) - (a.volume ?? -1) || a.keyword.length - b.keyword.length || a.keyword.localeCompare(b.keyword))[0];
-  return best?.keyword ?? 'Untitled cluster';
+  const order = (a: { keyword: string; volume: number | null }, b: { keyword: string; volume: number | null }) =>
+    (b.volume ?? -1) - (a.volume ?? -1) || a.keyword.length - b.keyword.length || a.keyword.localeCompare(b.keyword);
+  const sorted = [...keywords].sort(order);
+  if (keywords.length >= 3) {
+    const toks = keywords.map((k) => tokens(k.keyword));
+    const df = new Map<string, number>();
+    for (const ts of toks) for (const t of ts) df.set(t, (df.get(t) ?? 0) + 1);
+    const common = (t: string) => (df.get(t) ?? 0) / keywords.length >= 0.4;
+    // Rank by the share of each keyword's words that the cluster shares; the stable sort keeps volume order on ties.
+    const share = (k: { keyword: string }) => { const ts = tokens(k.keyword); return ts.length ? ts.filter(common).length / ts.length : 0; };
+    const best = [...sorted].sort((a, b) => share(b) - share(a))[0];
+    if (best && share(best) > 0) return best.keyword;
+  }
+  return sorted[0]?.keyword ?? 'Untitled cluster';
 }

@@ -184,3 +184,37 @@ describe('end to end with the mock', () => {
     }
   });
 });
+
+describe('QA brief fixes', () => {
+  it('drops the question verb from the topic, so headings read naturally', () => {
+    expect(headTerm('how to store climbing harness')).toBe('climbing harness');
+    expect(headTerm('is wild camping legal in the uk')).toBe('wild camping');
+    expect(headTerm('camping store near me')).toBe('camping store');
+  });
+
+  it('opens a how-to guide with the question and keeps the closing sections when the outline is long', () => {
+    const kws = ['how to store climbing harness', 'how to choose climbing harness', 'are climbing harness worth it', 'what is the best climbing harness', 'what size climbing harness',
+      'how to wash climbing harness', 'how long do climbing harness last', 'climbing harness under £100', 'climbing harness review', 'best climbing harness', 'kids climbing harness', 'climbing harness uk',
+      'womens climbing harness', 'climbing harness checklist', 'climbing harness size chart'];
+    const o = buildOutline(target(kws[0], kws), 'guide', 'for_beginners');
+    expect(o[0].h2).toBe('How to store climbing harness: the short answer');
+    expect(o.at(-1)!.h2).toBe('Where to go next');
+    expect(o.some((s) => s.h2 === 'Common questions')).toBe(true);
+    expect(o.map((s) => s.h2).join(' ')).not.toMatch(/store climbing harness (on|reviews|for|in)/i);
+    // Every target keyword is still asked for somewhere.
+    const asked = new Set(o.flatMap((s) => s.answers));
+    expect(kws.filter((k) => !asked.has(k)).length).toBeLessThanOrEqual(0);
+  });
+
+  it('suggests no internal links that only share a qualifier with the topic', () => {
+    const pages = [{ path: '/guides/how-to-choose-waterproof-jackets', title: 'How to choose waterproof jackets', clicks: 100, template: 'guides' }, { path: '/guides/climbing-harness-fit', title: 'Harness fit', clicks: 5, template: 'guides' }];
+    const l = linkSuggestions(target('climbing harness', ['climbing harness', 'waterproof climbing harness']), pages, null, false);
+    expect(l.to.map((x) => x.path)).toEqual(['/guides/climbing-harness-fit']);
+  });
+
+  it('names the page to expand in the Markdown', () => {
+    const md = briefMarkdown({ titleOptions: ['T'], title: 'T', queries: [], format: 'guide', angle: 'complete_overview', angleLabel: 'The complete overview', length: '600_900', edge: 'deeper_coverage', edgeLine: 'x', outline: [], linksTo: [], linksFrom: [], sources: [], expandPath: '/guides/best-compass', expandTitle: 'Best compass' },
+      { primary: 'compass', go: 'expand_existing', status: 'Proposed', site: 'sample-outdoors.example' });
+    expect(md).toContain('**Expand this page:** /guides/best-compass (Best compass)');
+  });
+});
